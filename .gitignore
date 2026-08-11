@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+dist/
+build/
+*.egg-info/
+native/target/
+runs/
+leaderboard.json
+leaderboard.html
+leaderboard.md
+*.mp4
+*.recorder.log
+.DS_Store
+.env

@@ -1,0 +1,44 @@
+[project]
+name = "sts-bench"
+version = "0.1.0"
+description = "Reproducible LLM benchmark and RL environment for the real Slay the Spire game"
+readme = "README.md"
+requires-python = ">=3.11,<3.15"
+license = "MIT"
+authors = [{ name = "Abhi" }]
+keywords = ["benchmark", "llm", "reinforcement-learning", "slay-the-spire"]
+dependencies = [
+  "openai>=2.9,<3",
+]
+
+[project.optional-dependencies]
+training = ["verifiers>=0.1.14,<0.2"]
+dev = [
+  "pytest>=8.4,<10",
+  "pytest-asyncio>=1.2,<2",
+  "ruff>=0.12,<1",
+]
+
+[project.scripts]
+sts-bench = "sts_bench.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sts_bench"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+  "live: requires a user-owned Slay the Spire installation with CommunicationMod",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
