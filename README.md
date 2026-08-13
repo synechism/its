@@ -16,6 +16,7 @@ score. `sts-bench` does not include Slay the Spire, its assets, or any mod binar
 - Exact `START <character> <ascension> <seed>` control through CommunicationMod.
 - Stable model observations with random card UUIDs removed and draw-pile order hidden.
 - Explicit, validated `ACTION <index>` responses with retries and logged forced defaults.
+- Automatic tutorial, animation, and focus-overlay recovery that does not consume model budget.
 - Game-over-derived win/loss and score; no model-authored or rubric reward.
 - Per-run manifests, JSONL trajectories, outcomes, and readable transcripts.
 - Real-game replay, two-pass determinism checking, and ffmpeg-compatible video capture.
@@ -60,6 +61,17 @@ cd its
 uv sync --extra dev
 ```
 
+For complete card observations, build the repository's source-only observer mod against your own
+installation and copy the resulting JAR into the game's `mods/` directory:
+
+```bash
+./scripts/build-observer-mod /path/to/SlayTheSpire.app/Contents/Resources
+```
+
+Enable **Sts Bench Observer** with BaseMod and Communication Mod. It patches only Communication
+Mod's card-to-JSON conversion, adding live rules text and dynamic damage/block/magic values from
+the authoritative `AbstractCard`. It contains no game assets, content database, or simulated rules.
+
 Launch the game with ModTheSpire, BaseMod, and CommunicationMod enabled once so the mod creates
 its config. Set its `command` to the **absolute** bridge executable, for example:
 
@@ -101,6 +113,11 @@ When it prints `Listening`, use CommunicationMod's **Start external process** bu
 first-legal policy will play one visible run and write its artifacts under `runs/`. It is only a
 wiring test, not a competent policy.
 
+On macOS, Slay the Spire may open its Settings overlay after losing focus. The controller closes
+that overlay automatically when CommunicationMod reports it, and likewise dismisses first-profile
+tutorial popups. These engine-maintenance transitions are replayed and audited but do not count as
+model decisions or API calls.
+
 ## Evaluate a model
 
 Any Chat Completions-compatible endpoint works:
@@ -118,6 +135,10 @@ uv run sts-bench eval \
 For another provider, add `--base-url` and, if needed, `--api-key`. Every model should play the
 same seed-set version, character, ascension, retry budget, and max-decision limit. Full v1 is 100
 seeds; use a small `--limit` only for development.
+
+`eval` requires the Sts Bench Observer fields by default and checks them immediately after the
+seeded reset, before making the first model API call. Use `--no-require-observer` only for wiring
+experiments whose results will not enter the benchmark leaderboard.
 
 Build leaderboard artifacts afterward:
 
@@ -196,10 +217,9 @@ rollouts waiting for a lease.
   normalization, action authority, hidden-information policy, artifacts, and deterministic hashes.
 - Upstream CommunicationMod lists edge cases around Match and Keep, full potion inventories, and
   certain manual interactions. Benchmark runs should not accept manual input.
-- Standard CommunicationMod transmits card name, ID, cost, type, and flags but not full rules text.
-  The serializer will include `description` when a compatible mod adds it. Until a pinned companion
-  metadata mod ships, models are expected to know the base-game card corpus; this is the largest
-  remaining observation-completeness gap.
+- Published runs should enable the source-only Sts Bench Observer companion mod; standard
+  Communication Mod omits card rules text and live damage/block/magic values. Runs without it are
+  useful for transport testing but do not meet the benchmark's observation-completeness bar.
 - The standalone `eval` CLI drives one worker sequentially. The `verifiers.v1` adapter has a
   concurrent worker pool, but provisioning and supervising multiple graphical game processes is
   still a self-hosted operational responsibility.

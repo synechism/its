@@ -8,6 +8,7 @@ max_decisions = 1200
 retry_budget = 2
 runs_dir = "runs"
 history_turns = 2
+require_observer = true
 
 # Every local game bridge connects to this shared pool listener.
 worker_host = "127.0.0.1"

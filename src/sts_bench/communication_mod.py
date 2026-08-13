@@ -9,6 +9,7 @@ from sts_bench.models import GameState, LegalAction
 
 PROTOCOL_NAME = "communicationmod-json-v1"
 EMPTY_POTION_IDS = {"Potion Slot", "Potion Slot "}
+OBSERVER_REQUIRED_CARD_FIELDS = {"raw_description", "damage", "block", "magic_number"}
 
 
 class CommunicationError(RuntimeError):
@@ -80,6 +81,27 @@ def _card_label(card: dict[str, Any]) -> str:
     return f"play {card.get('name', card.get('id', 'card'))}{upgraded} (cost {cost})"
 
 
+def observer_version(envelope: dict[str, Any]) -> str | None:
+    """Return the companion observer version from an enriched visible card."""
+    advertised = envelope.get("sts_bench_observer_version")
+    if advertised:
+        return str(advertised)
+    game = envelope.get("game_state") or {}
+    cards: list[dict[str, Any]] = list(game.get("deck") or [])
+    combat = game.get("combat_state") or {}
+    for pile in ("hand", "draw_pile", "discard_pile", "exhaust_pile", "limbo"):
+        cards.extend(combat.get(pile) or [])
+    screen = game.get("screen_state") or {}
+    for value in screen.values():
+        if isinstance(value, list):
+            cards.extend(item for item in value if isinstance(item, dict) and "id" in item)
+    for card in cards:
+        version = card.get("sts_bench_observer_version")
+        if version and OBSERVER_REQUIRED_CARD_FIELDS.issubset(card):
+            return str(version)
+    return None
+
+
 def enumerate_legal_actions(envelope: dict[str, Any]) -> tuple[LegalAction, ...]:
     """Expand CommunicationMod's command capabilities into exact, indexed choices."""
     if not envelope.get("in_game"):
@@ -88,6 +110,16 @@ def enumerate_legal_actions(envelope: dict[str, Any]) -> tuple[LegalAction, ...]
     commands = {str(command).lower() for command in envelope.get("available_commands") or []}
     candidates: list[tuple[str, str, str, dict[str, Any]]] = []
     monsters = _alive_monsters(game)
+
+    # Slay the Spire opens its Settings screen when a windowed game loses
+    # focus. That can happen while a local orchestrator starts a controller or
+    # recorder. CommunicationMod still reports a stable state, but none of the
+    # semantic combat commands can advance until the overlay is dismissed.
+    screen_name = str(game.get("screen_name", "")).upper()
+    if screen_name == "SETTINGS" and "key" in commands:
+        candidates.append(("KEY CANCEL", "dismiss_overlay", "close settings overlay", {}))
+    elif screen_name == "FTUE" and "key" in commands:
+        candidates.append(("KEY CONFIRM", "dismiss_tutorial", "dismiss tutorial overlay", {}))
 
     if "play" in commands:
         hand = (game.get("combat_state") or {}).get("hand") or []

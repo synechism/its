@@ -42,7 +42,7 @@ def replay_live(game: LiveGame, run_dir: Path, *, step_delay: float = 0.0) -> Re
             return ReplayResult(False, index, f"recorded command is not legal at decision {index}")
         if step_delay:
             time.sleep(step_delay)
-        state = game.step(matches[0])
+        state = game.step(matches[0], count_decision=not bool(row.get("automatic", False)))
         if state.stable_hash() != row["resulting_state_hash"]:
             return ReplayResult(False, index + 1, f"state hash diverged after decision {index}")
     return ReplayResult(True, len(rows), "trajectory reproduced exactly in the real game")

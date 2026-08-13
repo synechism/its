@@ -32,6 +32,7 @@ class StsBenchEnvConfig(vf.EnvConfig):
     worker_state_timeout: float | None = 120.0
     worker_acquire_timeout: float | None = None
     history_turns: int = Field(2, ge=0)
+    require_observer: bool = True
 
 
 def _source(config: StsBenchEnvConfig):
@@ -111,6 +112,11 @@ async def _program(task, state, *, pool: WorkerPool, config: StsBenchEnvConfig):
     game = await asyncio.to_thread(pool.acquire, config.worker_acquire_timeout)
     reusable = False
     try:
+        if config.require_observer and not game.engine.get("observer_version"):
+            raise RuntimeError(
+                "worker observations do not include Sts Bench Observer card fields; "
+                "install/enable the companion mod before running model evaluations"
+            )
         client = cast(AsyncOpenAI, state.get_client(api="chat"))
         model = state.get_model()
         messages: list[dict[str, str]] = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -150,6 +156,7 @@ async def _program(task, state, *, pool: WorkerPool, config: StsBenchEnvConfig):
                 runs_dir=None if config.runs_dir is None else Path(config.runs_dir),
                 benchmark_version=config.seed_set,
                 model_config={"source": "verifiers.v1", "history_turns": config.history_turns},
+                require_observer=config.require_observer,
             ),
             respond,
             game=game,

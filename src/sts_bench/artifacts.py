@@ -67,6 +67,17 @@ class RunArtifacts:
         outcome.run_id = self.run_id
         self._write_json(self.root / "outcome.json", outcome.to_dict())
 
+    def mark_interrupted(self, error: BaseException) -> None:
+        self._write_json(
+            self.root / "interrupted.json",
+            {
+                "run_id": self.run_id,
+                "interrupted_at": datetime.now(UTC).isoformat(),
+                "error_type": type(error).__name__,
+                "message": str(error),
+            },
+        )
+
     @staticmethod
     def _write_json(path: Path, payload: dict[str, Any]) -> None:
         temporary = path.with_suffix(path.suffix + ".tmp")

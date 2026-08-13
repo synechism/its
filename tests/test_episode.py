@@ -8,6 +8,7 @@ import pytest
 from sts_bench.episode import EpisodeConfig, play_episode
 from sts_bench.game import LiveGame
 from sts_bench.models import ModelReply
+from sts_bench.transport import WireError
 
 
 class FakeConnection:
@@ -69,3 +70,99 @@ async def test_episode_uses_real_commands_and_writes_replay_artifacts(
     assert (run_dir / "manifest.json").exists()
     assert (run_dir / "outcome.json").exists()
     assert "ENGINE COMMAND END" in (run_dir / "transcript.txt").read_text()
+
+
+@pytest.mark.asyncio
+async def test_episode_applies_single_automatic_action_without_calling_model(
+    tmp_path, menu_envelope: dict, combat_envelope: dict, victory_envelope: dict
+) -> None:
+    tutorial = json.loads(json.dumps(combat_envelope))
+    tutorial["available_commands"] = ["key", "state", "wait"]
+    tutorial["game_state"]["screen_name"] = "FTUE"
+    tutorial["game_state"]["combat_state"]["hand"] = []
+    connection = FakeConnection([menu_envelope, tutorial, victory_envelope])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+
+    async def model_must_not_run(*_args) -> ModelReply:
+        raise AssertionError("automatic engine transitions must not call the model")
+
+    outcome = await play_episode(
+        EpisodeConfig(
+            seed="STSBENCHV1000",
+            model="test-model",
+            runs_dir=tmp_path,
+            max_decisions=1,
+        ),
+        model_must_not_run,
+        game=game,
+    )
+
+    assert connection.commands == ["START IRONCLAD 0 STSBENCHV1000", "KEY CONFIRM"]
+    assert outcome.won
+    assert outcome.decisions == 0
+    assert outcome.response_count == 0
+    assert outcome.forced_default_count == 0
+    row = json.loads((next(tmp_path.iterdir()) / "trajectory.jsonl").read_text().strip())
+    assert row["automatic"] is True
+    assert row["forced_default"] is False
+    assert row["raw_response"] == ""
+
+
+@pytest.mark.asyncio
+async def test_observer_requirement_fails_before_first_model_call(
+    menu_envelope: dict, combat_envelope: dict
+) -> None:
+    connection = FakeConnection([menu_envelope, combat_envelope])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+
+    async def model_must_not_run(*_args) -> ModelReply:
+        raise AssertionError("observer preflight must happen before the model call")
+
+    with pytest.raises(RuntimeError, match="Sts Bench Observer"):
+        await play_episode(
+            EpisodeConfig(
+                seed="STSBENCHV1000",
+                model="test-model",
+                max_decisions=1,
+                require_observer=True,
+            ),
+            model_must_not_run,
+            game=game,
+        )
+
+    assert connection.commands == []
+
+
+@pytest.mark.asyncio
+async def test_interrupted_episode_writes_diagnostic_artifact(
+    tmp_path, menu_envelope: dict, combat_envelope: dict
+) -> None:
+    class DroppingConnection(FakeConnection):
+        def receive_envelope(self) -> dict:
+            if not self.envelopes:
+                raise WireError("worker connection closed")
+            return super().receive_envelope()
+
+    connection = DroppingConnection([menu_envelope, combat_envelope])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+
+    async def choose_first(*_args) -> ModelReply:
+        return ModelReply("ACTION 0")
+
+    with pytest.raises(WireError, match="worker connection closed"):
+        await play_episode(
+            EpisodeConfig(
+                seed="STSBENCHV1000",
+                model="test-model",
+                runs_dir=tmp_path,
+                max_decisions=1,
+            ),
+            choose_first,
+            game=game,
+        )
+
+    interrupted = json.loads(
+        (next(tmp_path.iterdir()) / "interrupted.json").read_text(encoding="utf-8")
+    )
+    assert interrupted["error_type"] == "WireError"
+    assert interrupted["message"] == "worker connection closed"

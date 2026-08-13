@@ -45,10 +45,20 @@ def _card(card: dict[str, Any]) -> str:
         f"cost={card.get('cost', '?')}",
         f"type={card.get('type', '?')}",
     ]
+    for label, key in (
+        ("damage", "damage"),
+        ("block", "block"),
+        ("magic", "magic_number"),
+    ):
+        value = card.get(key)
+        if isinstance(value, int) and value >= 0:
+            fields.append(f"{label}={value}")
     if card.get("exhausts"):
         fields.append("exhaust")
     if card.get("ethereal"):
         fields.append("ethereal")
+    if card.get("keywords"):
+        fields.append("keywords=" + ",".join(str(item) for item in card["keywords"]))
     if description:
         fields.append(f"text={description}")
     return " ".join(fields)
@@ -169,7 +179,14 @@ def parse_action(response: str, legal_actions: tuple[LegalAction, ...]) -> Legal
 def safe_default(legal_actions: tuple[LegalAction, ...]) -> LegalAction:
     if not legal_actions:
         raise ActionParseError("the game supplied no legal action")
-    for preferred in ("end_turn", "proceed", "wait", "return"):
+    for preferred in (
+        "dismiss_overlay",
+        "dismiss_tutorial",
+        "end_turn",
+        "proceed",
+        "wait",
+        "return",
+    ):
         for action in legal_actions:
             if action.kind == preferred:
                 return action

@@ -37,6 +37,18 @@ def _announce(server: WorkerServer) -> None:
     print("Now launch the game with CommunicationMod and the sts-bench bridge.", file=sys.stderr)
 
 
+def _check_observer(game: LiveGame, *, required: bool) -> None:
+    if game.engine.get("observer_version"):
+        return
+    message = (
+        "worker observations do not include Sts Bench Observer card fields; "
+        "install/enable the companion mod for benchmark-quality model runs"
+    )
+    if required:
+        raise RuntimeError(message)
+    print(f"WARNING: {message}", file=sys.stderr)
+
+
 def _selected_seeds(args: argparse.Namespace) -> list[str]:
     if args.seeds:
         seeds = [seed.strip().upper() for seed in args.seeds.split(",") if seed.strip()]
@@ -51,6 +63,7 @@ async def _eval(args: argparse.Namespace) -> int:
         _announce(server)
         game = LiveGame(server.accept())
         try:
+            _check_observer(game, required=args.require_observer)
             outcomes = await evaluate_model(
                 ModelConfig(
                     model=args.model,
@@ -69,6 +82,7 @@ async def _eval(args: argparse.Namespace) -> int:
                 retry_budget=args.retry_budget,
                 runs_dir=args.runs_dir,
                 benchmark_version=args.seed_set,
+                require_observer=args.require_observer,
             )
         finally:
             game.close()
@@ -81,6 +95,7 @@ async def _smoke(args: argparse.Namespace) -> int:
         _announce(server)
         game = LiveGame(server.accept())
         try:
+            _check_observer(game, required=False)
             policy = FirstLegalPolicy()
             outcome = await play_episode(
                 EpisodeConfig(
@@ -172,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--seed-set", default="v1")
     evaluate.add_argument("--seeds", default=None, help="comma-separated override")
     evaluate.add_argument("--limit", type=int, default=None)
+    evaluate.add_argument(
+        "--require-observer",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="reject workers missing the Sts Bench Observer card fields (default: true)",
+    )
 
     smoke = subparsers.add_parser("smoke", help="play one live run with a scripted policy")
     _add_worker_server(smoke)

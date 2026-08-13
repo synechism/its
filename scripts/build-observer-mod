@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 1 ]]; then
+  echo "usage: $0 /path/to/SlayTheSpire.app/Contents/Resources" >&2
+  exit 2
+fi
+
+game_resources=$1
+observer_root=$(cd "$(dirname "$0")/../native/sts-bench-observer" && pwd)
+mts_jar=${MTS_JAR:-}
+basemod_jar=${BASEMOD_JAR:-}
+communication_jar=${COMMUNICATION_MOD_JAR:-}
+
+if [[ -z "$mts_jar" || -z "$basemod_jar" || -z "$communication_jar" ]]; then
+  workshop_root=$(cd "$game_resources/../../../../../workshop/content/646570" 2>/dev/null && pwd || true)
+  mts_jar=${mts_jar:-$workshop_root/1605060445/ModTheSpire.jar}
+  basemod_jar=${basemod_jar:-$workshop_root/1605833019/BaseMod.jar}
+  communication_jar=${communication_jar:-$workshop_root/2131373661/CommunicationMod.jar}
+fi
+
+game_jar="$game_resources/desktop-1.0.jar"
+for dependency in "$game_jar" "$mts_jar" "$basemod_jar" "$communication_jar"; do
+  if [[ ! -f "$dependency" ]]; then
+    echo "missing build dependency: $dependency" >&2
+    echo "set MTS_JAR, BASEMOD_JAR, and COMMUNICATION_MOD_JAR if using non-Workshop mods" >&2
+    exit 1
+  fi
+done
+
+classes_dir="$observer_root/build/classes"
+output_jar="$observer_root/dist/StsBenchObserver.jar"
+if [[ "$classes_dir" != "$observer_root/build/classes" ]]; then
+  echo "refusing to clean unexpected build path: $classes_dir" >&2
+  exit 1
+fi
+rm -rf -- "$observer_root/build"
+mkdir -p "$classes_dir" "$(dirname "$output_jar")"
+
+javac --release 8 \
+  -cp "$game_jar:$mts_jar:$basemod_jar:$communication_jar" \
+  -d "$classes_dir" \
+  "$observer_root"/src/main/java/stsbenchobserver/*.java
+
+cp "$observer_root/ModTheSpire.json" "$classes_dir/ModTheSpire.json"
+jar --create --file "$output_jar" -C "$classes_dir" .
+echo "$output_jar"

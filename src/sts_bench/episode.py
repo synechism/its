@@ -32,6 +32,7 @@ class EpisodeConfig:
     runs_dir: Path | None = None
     benchmark_version: str = "v1"
     model_config: dict[str, Any] = dataclasses.field(default_factory=dict)
+    require_observer: bool = False
 
 
 async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameBackend) -> Outcome:
@@ -43,7 +44,22 @@ async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameB
     artifacts: RunArtifacts | None = None
     tokens_in = tokens_out = illegal_count = forced_count = response_count = 0
     agent_terminated = False
+    initial_engine = getattr(game, "engine", {})
+    if (
+        config.require_observer
+        and isinstance(initial_engine, dict)
+        and not initial_engine.get("observer_version")
+    ):
+        raise RuntimeError(
+            "worker observations do not include Sts Bench Observer card fields; "
+            "install/enable the companion mod before running model evaluations"
+        )
     state = game.reset(config.seed, config.character, config.ascension)
+    if config.require_observer and not state.engine.get("observer_version"):
+        raise RuntimeError(
+            "worker observations do not include Sts Bench Observer card fields; "
+            "install/enable the companion mod before running model evaluations"
+        )
 
     if config.runs_dir is not None:
         artifacts = RunArtifacts.create(
@@ -65,75 +81,99 @@ async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameB
                 "protocol_version": PROTOCOL_VERSION,
                 "engine": state.engine,
                 "model_config": config.model_config,
+                "require_observer": config.require_observer,
             },
         )
 
-    while not state.terminal and state.decisions < config.max_decisions:
-        before = state
-        prompt = serialize_state(before)
-        current_prompt = prompt
-        responses: list[str] = []
-        errors: list[str] = []
-        action = None
-        model_chose_legal = False
+    try:
+        while not state.terminal and state.decisions < config.max_decisions:
+            before = state
+            prompt = serialize_state(before)
+            current_prompt = prompt
+            responses: list[str] = []
+            errors: list[str] = []
+            action = None
+            model_chose_legal = False
 
-        for attempt in range(config.retry_budget + 1):
-            reply = await respond(current_prompt, before.decisions, attempt)
-            response_count += 1
-            tokens_in += reply.tokens_in
-            tokens_out += reply.tokens_out
-            responses.append(reply.content)
-            if reply.terminated:
-                agent_terminated = True
-                errors.append("model interaction terminated")
-                break
-            try:
-                action = parse_action(reply.content, before.legal_actions)
-                model_chose_legal = True
-                break
-            except ActionParseError as error:
-                illegal_count += 1
-                errors.append(str(error))
-                if attempt < config.retry_budget:
-                    current_prompt = retry_prompt(str(error), before)
-
-        if action is None:
-            action = safe_default(before.legal_actions)
-            forced_count += 1
-
-        state = game.step(action)
-        if artifacts is not None:
-            row = {
-                "decision": before.decisions,
-                "state_hash": before.stable_hash(),
-                "state": before.canonical_dict(),
-                "prompt": prompt,
-                "raw_response": responses[-1] if responses else "",
-                "attempt_responses": responses,
-                "parse_errors": errors,
-                "action": action.to_dict(),
-                "engine_command": action.command,
-                "legal": model_chose_legal,
-                "retries": max(0, len(responses) - 1),
-                "forced_default": not model_chose_legal,
-                "resulting_state_hash": state.stable_hash(),
-                "resulting_outcome_delta": {
-                    "hp": state.hp - before.hp,
-                    "floor": state.floor_reached - before.floor_reached,
-                    "terminal_status": state.status if state.terminal else None,
-                },
+            automatic_actions = {
+                "dismiss_overlay",
+                "dismiss_tutorial",
+                "wait",
             }
-            transcript = (
-                f"DECISION {before.decisions}\n{prompt}\n\n"
-                f"MODEL\n{responses[-1] if responses else '<terminated>'}\n\n"
-                f"APPLIED ACTION {action.index}: {action.label}\n"
-                f"ENGINE COMMAND {action.command}"
-                + (" (forced default)" if not model_chose_legal else "")
-            )
-            artifacts.record(row, transcript)
+            if (
+                len(before.legal_actions) == 1
+                and before.legal_actions[0].kind in automatic_actions
+            ):
+                action = before.legal_actions[0]
 
-        if agent_terminated:
-            break
+            if action is None:
+                for attempt in range(config.retry_budget + 1):
+                    reply = await respond(current_prompt, before.decisions, attempt)
+                    response_count += 1
+                    tokens_in += reply.tokens_in
+                    tokens_out += reply.tokens_out
+                    responses.append(reply.content)
+                    if reply.terminated:
+                        agent_terminated = True
+                        errors.append("model interaction terminated")
+                        break
+                    try:
+                        action = parse_action(reply.content, before.legal_actions)
+                        model_chose_legal = True
+                        break
+                    except ActionParseError as error:
+                        illegal_count += 1
+                        errors.append(str(error))
+                        if attempt < config.retry_budget:
+                            current_prompt = retry_prompt(str(error), before)
+
+            if action is None:
+                action = safe_default(before.legal_actions)
+                forced_count += 1
+
+            is_automatic = action.kind in automatic_actions
+            state = game.step(action, count_decision=not is_automatic)
+            if artifacts is not None:
+                row = {
+                    "decision": before.decisions,
+                    "state_hash": before.stable_hash(),
+                    "state": before.canonical_dict(),
+                    "prompt": prompt,
+                    "raw_response": responses[-1] if responses else "",
+                    "attempt_responses": responses,
+                    "parse_errors": errors,
+                    "action": action.to_dict(),
+                    "engine_command": action.command,
+                    "automatic": is_automatic,
+                    "legal": model_chose_legal,
+                    "retries": max(0, len(responses) - 1),
+                    "forced_default": not is_automatic and not model_chose_legal,
+                    "resulting_state_hash": state.stable_hash(),
+                    "resulting_outcome_delta": {
+                        "hp": state.hp - before.hp,
+                        "floor": state.floor_reached - before.floor_reached,
+                        "terminal_status": state.status if state.terminal else None,
+                    },
+                }
+                transcript = (
+                    f"DECISION {before.decisions}\n{prompt}\n\n"
+                    f"MODEL\n{responses[-1] if responses else '<automatic>'}\n\n"
+                    f"APPLIED ACTION {action.index}: {action.label}\n"
+                    f"ENGINE COMMAND {action.command}"
+                    + (
+                        " (automatic)"
+                        if is_automatic
+                        else " (forced default)" if not model_chose_legal else ""
+                    )
+                )
+                artifacts.record(row, transcript)
+
+            if agent_terminated:
+                break
+    except BaseException as error:
+        if artifacts is not None:
+            artifacts.mark_interrupted(error)
+        raise
 
     outcome = game.outcome(state, model=config.model)
     outcome.tokens_in = tokens_in

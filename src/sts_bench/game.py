@@ -8,6 +8,7 @@ from sts_bench.communication_mod import (
     PROTOCOL_NAME,
     CommunicationError,
     normalize_state,
+    observer_version,
     state_score,
 )
 from sts_bench.models import GameState, LegalAction, Outcome
@@ -26,7 +27,7 @@ _CHARACTERS = {
 class GameBackend(Protocol):
     def reset(self, seed: str, character: str, ascension: int = 0) -> GameState: ...
 
-    def step(self, action: LegalAction) -> GameState: ...
+    def step(self, action: LegalAction, *, count_decision: bool = True) -> GameState: ...
 
     def outcome(self, state: GameState, *, model: str) -> Outcome: ...
 
@@ -48,6 +49,7 @@ class LiveGame:
             "protocol": PROTOCOL_NAME,
         }
         self._envelope = connection.receive_envelope()
+        self.engine["observer_version"] = observer_version(self._envelope)
         self._requested_seed = ""
         self._decisions = 0
         self._progress = self._new_progress()
@@ -85,10 +87,11 @@ class LiveGame:
         self._progress = self._new_progress()
         self.connection.send_command(f"START {_CHARACTERS[character_key]} {ascension} {seed}")
         self._envelope = self.connection.receive_envelope()
+        self.engine["observer_version"] = observer_version(self._envelope)
         self._state = self._normalize()
         return self._state
 
-    def step(self, action: LegalAction) -> GameState:
+    def step(self, action: LegalAction, *, count_decision: bool = True) -> GameState:
         before = self.state
         matching = [
             candidate
@@ -106,7 +109,8 @@ class LiveGame:
                 f"CommunicationMod rejected an enumerated legal action {action.command!r}: "
                 f"{after_envelope['error']}"
             )
-        self._decisions += 1
+        if count_decision:
+            self._decisions += 1
         self._update_progress(before_envelope, after_envelope)
         self._envelope = after_envelope
         self._state = self._normalize()

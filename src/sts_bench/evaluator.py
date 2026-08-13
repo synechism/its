@@ -75,6 +75,7 @@ async def evaluate_model(
     retry_budget: int = 2,
     runs_dir: Path = Path("runs"),
     benchmark_version: str = "v1",
+    require_observer: bool = True,
 ) -> list[Outcome]:
     model = OpenAICompatibleModel(model_config)
     outcomes: list[Outcome] = []
@@ -90,6 +91,7 @@ async def evaluate_model(
                 retry_budget=retry_budget,
                 runs_dir=runs_dir,
                 benchmark_version=benchmark_version,
+                require_observer=require_observer,
                 model_config={
                     "base_url": model_config.base_url,
                     "temperature": model_config.temperature,

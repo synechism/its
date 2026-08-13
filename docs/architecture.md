@@ -21,9 +21,13 @@ and places only controller-provided single-line commands on stdout.
 6. The controller sends the corresponding CommunicationMod command.
 7. The next stable envelope is normalized, hashed, and recorded.
 
-No state-changing `CLICK` or `KEY` command is exposed to the model. The benchmark uses semantic
-`PLAY`, `END`, `POTION`, `CHOOSE`, `PROCEED`, and `RETURN` commands. `WAIT` appears only when the
-game exposes no semantic choice and needs animation frames to advance.
+No state-changing `CLICK` or `KEY` command is exposed for model selection. The benchmark uses
+semantic `PLAY`, `END`, `POTION`, `CHOOSE`, `PROCEED`, and `RETURN` commands. When exactly one
+engine-maintenance transition is possible, the controller applies it without calling the model or
+charging its decision/token budget: `WAIT` advances animations, `KEY CONFIRM` dismisses first-run
+tutorials, and `KEY CANCEL` closes a Settings overlay opened by loss of window focus. Each remains
+fully recorded in the trajectory with `automatic=true` so replay sees the exact same command
+sequence.
 
 ## Reproducibility identity
 
@@ -50,6 +54,12 @@ choice-list order is preserved because those indices are visible and actionable.
 
 Card UUIDs are process-random and removed everywhere from the normalized state. Action selection
 uses current hand/choice indices, matching CommunicationMod itself.
+
+The optional Sts Bench Observer companion patch enriches Communication Mod's card JSON with the
+live card's rules text and current numeric fields. It reads those fields from the authoritative
+`AbstractCard` after Communication Mod serializes it, and stamps the observer version into every
+card object so manifests identify the exact observation build. It owns no content table and
+performs no transition or reward logic.
 
 ## Training deployment
 

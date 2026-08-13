@@ -32,4 +32,5 @@ def test_checked_in_environment_config_parses() -> None:
     path = Path(__file__).parents[1] / "configs" / "eval" / "sts-bench.toml"
     config = StsBenchEnvConfig.from_toml(path)
     assert config.seed_set == "v1"
+    assert config.require_observer is True
     assert config.harness["max_turns"] == 3600
