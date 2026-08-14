@@ -67,12 +67,15 @@ async def _eval(args: argparse.Namespace) -> int:
             outcomes = await evaluate_model(
                 ModelConfig(
                     model=args.model,
+                    backend=args.backend,
                     base_url=args.base_url,
                     api_key=args.api_key,
                     temperature=args.temperature,
                     max_tokens=args.max_tokens,
                     reasoning_effort=args.reasoning_effort,
                     history_turns=args.history_turns,
+                    codex_path=args.codex_path,
+                    timeout=args.model_timeout,
                 ),
                 seeds,
                 game=game,
@@ -177,12 +180,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_worker_server(evaluate)
     _add_run(evaluate)
     evaluate.add_argument("--model", required=True)
+    evaluate.add_argument(
+        "--backend",
+        choices=("openai", "codex-cli"),
+        default="openai",
+        help="direct OpenAI-compatible API or authenticated local Codex CLI",
+    )
     evaluate.add_argument("--base-url", default=None)
     evaluate.add_argument("--api-key", default=None)
     evaluate.add_argument("--temperature", type=float, default=0.0)
     evaluate.add_argument("--max-tokens", type=int, default=768)
     evaluate.add_argument("--reasoning-effort", default=None)
     evaluate.add_argument("--history-turns", type=int, default=2)
+    evaluate.add_argument("--codex-path", default="codex")
+    evaluate.add_argument("--model-timeout", type=float, default=300.0)
     evaluate.add_argument("--retry-budget", type=int, default=2)
     evaluate.add_argument("--seed-set", default="v1")
     evaluate.add_argument("--seeds", default=None, help="comma-separated override")

@@ -70,7 +70,11 @@ installation and copy the resulting JAR into the game's `mods/` directory:
 
 Enable **Sts Bench Observer** with BaseMod and Communication Mod. It patches only Communication
 Mod's card-to-JSON conversion, adding live rules text and dynamic damage/block/magic values from
-the authoritative `AbstractCard`. It contains no game assets, content database, or simulated rules.
+the authoritative `AbstractCard`. Live values are retained for actionable hand cards; stable base
+values are used for cards outside the hand so frame-timed render caches cannot change a replay
+hash. It also normalizes tutorials, unlock pools, and seen-boss flags before each seeded run. Use a
+dedicated benchmark profile: these unlocks persist in that profile. The observer contains no game
+assets, content database, or simulated rules.
 
 Launch the game with ModTheSpire, BaseMod, and CommunicationMod enabled once so the mod creates
 its config. Set its `command` to the **absolute** bridge executable, for example:
@@ -115,8 +119,10 @@ wiring test, not a competent policy.
 
 On macOS, Slay the Spire may open its Settings overlay after losing focus. The controller closes
 that overlay automatically when CommunicationMod reports it, and likewise dismisses first-profile
-tutorial popups. These engine-maintenance transitions are replayed and audited but do not count as
-model decisions or API calls.
+tutorial popups. It also waits through the transient `DEBUG` monster intent that the game can emit
+before a combat's real intent is initialized and through master-deck settlement after rewards,
+shops, events, and card grids. These engine-maintenance transitions are replayed and audited but do
+not count as model decisions or API calls.
 
 ## Evaluate a model
 
@@ -139,6 +145,17 @@ seeds; use a small `--limit` only for development.
 `eval` requires the Sts Bench Observer fields by default and checks them immediately after the
 seeded reset, before making the first model API call. Use `--no-require-observer` only for wiring
 experiments whose results will not enter the benchmark leaderboard.
+
+For a provisional local run without an API key, an authenticated Codex installation can be used:
+
+```bash
+uv run sts-bench eval --backend codex-cli --model gpt-5.6-terra \
+  --reasoning-effort low --limit 1
+```
+
+Each decision uses an ephemeral, read-only Codex process in an empty temporary directory. Results
+are labeled `codex-cli/<model>` because the Codex agent has additional system context; do not rank
+them as direct-API model results in a canonical leaderboard.
 
 Build leaderboard artifacts afterward:
 

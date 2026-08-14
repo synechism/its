@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -54,6 +55,8 @@ class LiveGame:
         self._decisions = 0
         self._progress = self._new_progress()
         self._state: GameState | None = None
+        self._force_wait_reason: str | None = None
+        self._deck_override: list[dict[str, Any]] | None = None
 
     @staticmethod
     def _new_progress() -> dict[str, Any]:
@@ -85,6 +88,8 @@ class LiveGame:
         self._requested_seed = seed
         self._decisions = 0
         self._progress = self._new_progress()
+        self._force_wait_reason = None
+        self._deck_override = None
         self.connection.send_command(f"START {_CHARACTERS[character_key]} {ascension} {seed}")
         self._envelope = self.connection.receive_envelope()
         self.engine["observer_version"] = observer_version(self._envelope)
@@ -102,6 +107,7 @@ class LiveGame:
             raise CommunicationError("action is not in the current game-owned legal action list")
 
         before_envelope = self._envelope
+        clearing_forced_wait = action.kind == "wait" and self._force_wait_reason is not None
         self.connection.send_command(matching[0].command)
         after_envelope = self.connection.receive_envelope()
         if after_envelope.get("error"):
@@ -113,8 +119,23 @@ class LiveGame:
             self._decisions += 1
         self._update_progress(before_envelope, after_envelope)
         self._envelope = after_envelope
+        if clearing_forced_wait:
+            self._force_wait_reason = None
+            self._deck_override = None
+        elif self._action_needs_deck_settlement(before, action):
+            self._force_wait_reason = "wait for master-deck mutation to settle"
+            self._deck_override = copy.deepcopy(before.visible.get("deck") or [])
         self._state = self._normalize()
         return self._state
+
+    @staticmethod
+    def _action_needs_deck_settlement(before: GameState, action: LegalAction) -> bool:
+        if action.kind not in {"choose", "proceed"}:
+            return False
+        screen_type = str(before.visible.get("screen_type", "")).upper()
+        if screen_type in {"CARD_REWARD", "SHOP_SCREEN", "GRID", "EVENT", "BOSS_REWARD"}:
+            return True
+        return screen_type == "COMBAT_REWARD" and action.metadata.get("choice") == "relic"
 
     def _normalize(self) -> GameState:
         return normalize_state(
@@ -123,6 +144,8 @@ class LiveGame:
             decisions=self._decisions,
             engine=self.engine,
             progress=self._progress,
+            force_wait_reason=self._force_wait_reason,
+            deck_override=self._deck_override,
         )
 
     def _update_progress(

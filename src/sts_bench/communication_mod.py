@@ -10,6 +10,18 @@ from sts_bench.models import GameState, LegalAction
 PROTOCOL_NAME = "communicationmod-json-v1"
 EMPTY_POTION_IDS = {"Potion Slot", "Potion Slot "}
 OBSERVER_REQUIRED_CARD_FIELDS = {"raw_description", "damage", "block", "magic_number"}
+_BASE_CARD_VALUES = {
+    "cost": "base_cost",
+    "damage": "base_damage",
+    "block": "base_block",
+    "magic_number": "base_magic_number",
+}
+_CARD_MODIFICATION_FLAGS = {
+    "is_cost_modified",
+    "is_damage_modified",
+    "is_block_modified",
+    "is_magic_number_modified",
+}
 
 
 class CommunicationError(RuntimeError):
@@ -30,8 +42,37 @@ def _scrub(value: Any) -> Any:
 
 
 def _canonical_card(card: dict[str, Any]) -> dict[str, Any]:
+    """Return stable rules data for a card that is not currently actionable."""
     result = dict(_scrub(card))
     result.pop("is_playable", None)
+    for current, base in _BASE_CARD_VALUES.items():
+        if base in result:
+            result[current] = result[base]
+    for flag in _CARD_MODIFICATION_FLAGS:
+        result.pop(flag, None)
+    return result
+
+
+def _stable_non_actionable_cards(value: Any) -> Any:
+    """Canonicalize card objects nested in rewards and other non-combat screens."""
+    if isinstance(value, dict):
+        if "id" in value and "base_cost" in value and "type" in value:
+            return _canonical_card(value)
+        return {
+            key: _stable_non_actionable_cards(item)
+            for key, item in sorted(value.items())
+            if key not in {"uuid", "instance_id"}
+        }
+    if isinstance(value, list):
+        return [_stable_non_actionable_cards(item) for item in value]
+    return value
+
+
+def _canonical_monster(monster: dict[str, Any]) -> dict[str, Any]:
+    """Remove post-death animation residue from an already-gone monster."""
+    result = dict(_scrub(monster))
+    if result.get("is_gone", False) and not result.get("half_dead", False):
+        result["powers"] = []
     return result
 
 
@@ -121,6 +162,28 @@ def enumerate_legal_actions(envelope: dict[str, Any]) -> tuple[LegalAction, ...]
     elif screen_name == "FTUE" and "key" in commands:
         candidates.append(("KEY CONFIRM", "dismiss_tutorial", "dismiss tutorial overlay", {}))
 
+    # CommunicationMod can publish the opening combat frame while a monster's
+    # move is still initialized to the game's DEBUG sentinel. A slow model call
+    # hides this race, while a fast replay can execute an intent-sensitive card
+    # (for example Spot Weakness) before the real intent appears. Make that
+    # frame an explicit, replayed maintenance transition.
+    transient_intent = any(
+        str(monster.get("intent", "")).upper() == "DEBUG" for _, monster in monsters
+    )
+    if not candidates and transient_intent and "wait" in commands:
+        candidates.append(
+            (
+                "WAIT 100",
+                "wait",
+                "wait for monster intent initialization",
+                {"frames": 100},
+            )
+        )
+        return tuple(
+            LegalAction(index=index, command=command, kind=kind, label=label, metadata=metadata)
+            for index, (command, kind, label, metadata) in enumerate(candidates)
+        )
+
     if "play" in commands:
         hand = (game.get("combat_state") or {}).get("hand") or []
         for hand_index, card in enumerate(hand, start=1):
@@ -208,7 +271,9 @@ def enumerate_legal_actions(envelope: dict[str, Any]) -> tuple[LegalAction, ...]
     )
 
 
-def _visible_state(game: dict[str, Any]) -> dict[str, Any]:
+def _visible_state(
+    game: dict[str, Any], *, deck_override: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     visible = {
         "room_type": game.get("room_type"),
         "room_phase": game.get("room_phase"),
@@ -222,8 +287,10 @@ def _visible_state(game: dict[str, Any]) -> dict[str, Any]:
         "potions": _scrub(game.get("potions") or []),
         "deck": _unordered_cards(game.get("deck") or []),
         "map": _map_state(game.get("map") or []),
-        "screen": _scrub(game.get("screen_state") or {}),
+        "screen": _stable_non_actionable_cards(game.get("screen_state") or {}),
     }
+    if deck_override is not None:
+        visible["deck"] = copy.deepcopy(deck_override)
     combat = game.get("combat_state")
     if combat is not None:
         combat_copy = copy.deepcopy(combat)
@@ -231,11 +298,15 @@ def _visible_state(game: dict[str, Any]) -> dict[str, Any]:
         combat_copy["draw_pile"] = _unordered_cards(combat.get("draw_pile") or [])
         combat_copy["discard_pile"] = _unordered_cards(combat.get("discard_pile") or [])
         combat_copy["exhaust_pile"] = _unordered_cards(combat.get("exhaust_pile") or [])
-        combat_copy["limbo"] = [_scrub(card) for card in combat.get("limbo") or []]
-        combat_copy["monsters"] = [_scrub(monster) for monster in combat.get("monsters") or []]
+        combat_copy["limbo"] = [
+            _canonical_card(card) for card in combat.get("limbo") or []
+        ]
+        combat_copy["monsters"] = [
+            _canonical_monster(monster) for monster in combat.get("monsters") or []
+        ]
         combat_copy["player"] = _scrub(combat.get("player") or {})
         if "card_in_play" in combat_copy:
-            combat_copy["card_in_play"] = _scrub(combat_copy["card_in_play"])
+            combat_copy["card_in_play"] = _canonical_card(combat_copy["card_in_play"])
         visible["combat"] = combat_copy
     return visible
 
@@ -247,6 +318,8 @@ def normalize_state(
     decisions: int,
     engine: dict[str, Any],
     progress: dict[str, Any] | None = None,
+    force_wait_reason: str | None = None,
+    deck_override: list[dict[str, Any]] | None = None,
 ) -> GameState:
     if envelope.get("error"):
         raise CommunicationError(str(envelope["error"]))
@@ -269,6 +342,21 @@ def normalize_state(
     if phase == "none":
         phase = str(game.get("room_phase", "unknown")).lower()
 
+    legal_actions = enumerate_legal_actions(envelope)
+    if force_wait_reason is not None:
+        commands = {str(command).lower() for command in envelope.get("available_commands") or []}
+        if "wait" not in commands:
+            raise CommunicationError("game cannot settle a transient state without WAIT")
+        legal_actions = (
+            LegalAction(
+                index=0,
+                command="WAIT 100",
+                kind="wait",
+                label=force_wait_reason,
+                metadata={"frames": 100},
+            ),
+        )
+
     return GameState(
         engine=dict(engine),
         requested_seed=requested_seed,
@@ -285,9 +373,9 @@ def normalize_state(
         block=int(combat_player.get("block", 0)),
         energy=(None if "energy" not in combat_player else int(combat_player.get("energy", 0))),
         gold=int(game.get("gold", 0)),
-        visible=_visible_state(game),
-        legal_actions=enumerate_legal_actions(envelope),
-        progress=dict(progress or {}),
+        visible=_visible_state(game, deck_override=deck_override),
+        legal_actions=legal_actions,
+        progress=copy.deepcopy(progress or {}),
     )
 
 

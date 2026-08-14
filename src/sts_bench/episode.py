@@ -19,6 +19,7 @@ from sts_bench.text_protocol import (
 )
 
 Responder = Callable[[str, int, int], Awaitable[ModelReply]]
+MAX_STALLED_AUTOMATIC_ACTIONS = 10
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +45,7 @@ async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameB
     artifacts: RunArtifacts | None = None
     tokens_in = tokens_out = illegal_count = forced_count = response_count = 0
     agent_terminated = False
+    stalled_automatic_actions = 0
     initial_engine = getattr(game, "engine", {})
     if (
         config.require_observer
@@ -167,6 +169,16 @@ async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameB
                     )
                 )
                 artifacts.record(row, transcript)
+
+            if is_automatic and state.stable_hash() == before.stable_hash():
+                stalled_automatic_actions += 1
+                if stalled_automatic_actions >= MAX_STALLED_AUTOMATIC_ACTIONS:
+                    raise RuntimeError(
+                        "automatic engine-maintenance action did not change game state after "
+                        f"{MAX_STALLED_AUTOMATIC_ACTIONS} attempts: {action.command}"
+                    )
+            else:
+                stalled_automatic_actions = 0
 
             if agent_terminated:
                 break

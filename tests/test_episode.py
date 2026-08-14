@@ -6,6 +6,7 @@ from collections import deque
 import pytest
 
 from sts_bench.episode import EpisodeConfig, play_episode
+from sts_bench.evaluator import _codex_usage
 from sts_bench.game import LiveGame
 from sts_bench.models import ModelReply
 from sts_bench.transport import WireError
@@ -31,6 +32,17 @@ class FakeConnection:
 
     def close(self) -> None:
         pass
+
+
+def test_codex_cli_usage_parser() -> None:
+    events = "\n".join(
+        [
+            '{"type":"thread.started","thread_id":"test"}',
+            '{"type":"turn.completed","usage":{"input_tokens":120,'
+            '"output_tokens":7,"reasoning_output_tokens":11}}',
+        ]
+    )
+    assert _codex_usage(events) == (120, 18)
 
 
 @pytest.mark.asyncio
@@ -106,6 +118,100 @@ async def test_episode_applies_single_automatic_action_without_calling_model(
     assert row["automatic"] is True
     assert row["forced_default"] is False
     assert row["raw_response"] == ""
+
+
+def test_card_reward_selection_records_a_stable_deck_settlement_wait(
+    menu_envelope: dict, combat_envelope: dict
+) -> None:
+    reward = json.loads(json.dumps(combat_envelope))
+    reward["available_commands"] = ["choose", "state", "wait"]
+    reward["game_state"]["room_phase"] = "COMPLETE"
+    reward["game_state"]["screen_type"] = "CARD_REWARD"
+    reward["game_state"]["screen_name"] = "CARD_REWARD"
+    reward["game_state"]["choice_list"] = ["battle trance"]
+    reward["game_state"].pop("combat_state")
+
+    selected = json.loads(json.dumps(reward))
+    selected["available_commands"] = ["proceed", "state", "wait"]
+    selected["game_state"]["screen_type"] = "COMBAT_REWARD"
+    selected["game_state"]["screen_name"] = "COMBAT_REWARD"
+    selected["game_state"]["choice_list"] = []
+    selected["game_state"]["deck"].append(
+        {
+            "name": "Battle Trance",
+            "id": "Battle Trance",
+            "cost": 0,
+            "upgrades": 0,
+            "type": "SKILL",
+            "rarity": "UNCOMMON",
+            "has_target": False,
+            "exhausts": False,
+            "ethereal": False,
+            "description": "Draw 3 cards.",
+        }
+    )
+    settled = json.loads(json.dumps(selected))
+
+    connection = FakeConnection([menu_envelope, reward, selected, settled])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+    state = game.reset("STSBENCHV1000", "Ironclad")
+    deck_before = state.visible["deck"]
+
+    state = game.step(state.legal_actions[0])
+
+    assert [action.command for action in state.legal_actions] == ["WAIT 100"]
+    assert state.visible["deck"] == deck_before
+
+    state = game.step(state.legal_actions[0], count_decision=False)
+
+    assert [action.command for action in state.legal_actions] == ["PROCEED"]
+    assert state.visible["deck"] != deck_before
+    assert connection.commands == ["START IRONCLAD 0 STSBENCHV1000", "CHOOSE 0", "WAIT 100"]
+
+
+def test_shop_purchase_records_a_stable_deck_settlement_wait(
+    menu_envelope: dict, combat_envelope: dict
+) -> None:
+    shop = json.loads(json.dumps(combat_envelope))
+    shop["available_commands"] = ["choose", "return", "state", "wait"]
+    shop["game_state"]["room_phase"] = "COMPLETE"
+    shop["game_state"]["screen_type"] = "SHOP_SCREEN"
+    shop["game_state"]["screen_name"] = "SHOP"
+    shop["game_state"]["choice_list"] = ["uppercut"]
+    shop["game_state"].pop("combat_state")
+
+    purchased = json.loads(json.dumps(shop))
+    purchased["game_state"]["choice_list"] = []
+    purchased["game_state"]["deck"].append(
+        {
+            "name": "Uppercut",
+            "id": "Uppercut",
+            "cost": 2,
+            "upgrades": 0,
+            "type": "ATTACK",
+            "rarity": "UNCOMMON",
+            "has_target": True,
+            "exhausts": False,
+            "ethereal": False,
+            "description": "Deal 13 damage.",
+        }
+    )
+    settled = json.loads(json.dumps(purchased))
+
+    connection = FakeConnection([menu_envelope, shop, purchased, settled])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+    state = game.reset("STSBENCHV1000", "Ironclad")
+    deck_before = state.visible["deck"]
+
+    state = game.step(state.legal_actions[0])
+
+    assert [action.command for action in state.legal_actions] == ["WAIT 100"]
+    assert state.visible["deck"] == deck_before
+
+    state = game.step(state.legal_actions[0], count_decision=False)
+
+    assert [action.command for action in state.legal_actions] == ["RETURN"]
+    assert state.visible["deck"] != deck_before
 
 
 @pytest.mark.asyncio

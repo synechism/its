@@ -18,6 +18,52 @@ class ReplayResult:
     message: str
 
 
+def _first_difference(expected: object, actual: object, path: str = "state") -> str | None:
+    if type(expected) is not type(actual):
+        return f"{path}: expected {type(expected).__name__}, got {type(actual).__name__}"
+    if isinstance(expected, dict):
+        actual_dict = actual
+        for key in sorted(set(expected) | set(actual_dict)):
+            if key not in expected:
+                return f"{path}.{key}: unexpected field"
+            if key not in actual_dict:
+                return f"{path}.{key}: missing field"
+            difference = _first_difference(expected[key], actual_dict[key], f"{path}.{key}")
+            if difference:
+                return difference
+        return None
+    if isinstance(expected, list):
+        actual_list = actual
+        if len(expected) != len(actual_list):
+            return f"{path}: expected {len(expected)} items, got {len(actual_list)}"
+        pairs = zip(expected, actual_list, strict=True)
+        for index, (expected_item, actual_item) in enumerate(pairs):
+            difference = _first_difference(
+                expected_item, actual_item, f"{path}[{index}]"
+            )
+            if difference:
+                return difference
+        return None
+    if expected != actual:
+        return f"{path}: expected {expected!r}, got {actual!r}"
+    return None
+
+
+def _divergence_message(
+    prefix: str,
+    expected_hash: str,
+    state: object,
+    expected_state: object | None,
+) -> str:
+    actual_hash = state.stable_hash()
+    detail = None
+    if expected_state is not None:
+        actual_state = json.loads(json.dumps(state.canonical_dict()))
+        detail = _first_difference(expected_state, actual_state)
+    suffix = f"; {detail}" if detail else ""
+    return f"{prefix}: expected {expected_hash}, got {actual_hash}{suffix}"
+
+
 def load_trajectory(run_dir: Path) -> tuple[dict, list[dict]]:
     manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     rows = [
@@ -35,7 +81,16 @@ def replay_live(game: LiveGame, run_dir: Path, *, step_delay: float = 0.0) -> Re
     )
     for index, row in enumerate(rows):
         if state.stable_hash() != row["state_hash"]:
-            return ReplayResult(False, index, f"state hash diverged before decision {index}")
+            return ReplayResult(
+                False,
+                index,
+                _divergence_message(
+                    f"state hash diverged before decision {index}",
+                    row["state_hash"],
+                    state,
+                    row.get("state"),
+                ),
+            )
         command = str(row["engine_command"])
         matches = [action for action in state.legal_actions if action.command == command]
         if len(matches) != 1:
@@ -44,7 +99,17 @@ def replay_live(game: LiveGame, run_dir: Path, *, step_delay: float = 0.0) -> Re
             time.sleep(step_delay)
         state = game.step(matches[0], count_decision=not bool(row.get("automatic", False)))
         if state.stable_hash() != row["resulting_state_hash"]:
-            return ReplayResult(False, index + 1, f"state hash diverged after decision {index}")
+            expected_state = rows[index + 1].get("state") if index + 1 < len(rows) else None
+            return ReplayResult(
+                False,
+                index + 1,
+                _divergence_message(
+                    f"state hash diverged after decision {index}",
+                    row["resulting_state_hash"],
+                    state,
+                    expected_state,
+                ),
+            )
     return ReplayResult(True, len(rows), "trajectory reproduced exactly in the real game")
 
 

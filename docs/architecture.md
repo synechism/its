@@ -24,10 +24,12 @@ and places only controller-provided single-line commands on stdout.
 No state-changing `CLICK` or `KEY` command is exposed for model selection. The benchmark uses
 semantic `PLAY`, `END`, `POTION`, `CHOOSE`, `PROCEED`, and `RETURN` commands. When exactly one
 engine-maintenance transition is possible, the controller applies it without calling the model or
-charging its decision/token budget: `WAIT` advances animations, `KEY CONFIRM` dismisses first-run
-tutorials, and `KEY CANCEL` closes a Settings overlay opened by loss of window focus. Each remains
-fully recorded in the trajectory with `automatic=true` so replay sees the exact same command
-sequence.
+charging its decision/token budget: `WAIT` advances animations and resolves the game's transient
+`DEBUG` monster-intent frame and master-deck mutations from rewards, shops, events, and card grids;
+an observer-assisted `KEY CONFIRM` dismisses first-run tutorials through their native **Got It**
+button, and
+`KEY CANCEL` closes a Settings overlay opened by loss of window focus. Each remains fully recorded
+in the trajectory with `automatic=true` so replay sees the exact same command sequence.
 
 ## Reproducibility identity
 
@@ -58,8 +60,23 @@ uses current hand/choice indices, matching CommunicationMod itself.
 The optional Sts Bench Observer companion patch enriches Communication Mod's card JSON with the
 live card's rules text and current numeric fields. It reads those fields from the authoritative
 `AbstractCard` after Communication Mod serializes it, and stamps the observer version into every
-card object so manifests identify the exact observation build. It owns no content table and
+card object so manifests identify the exact observation build. The controller retains live numeric
+values for actionable hand cards; cards in the deck and non-actionable piles/screens use their
+stable base values because `AbstractCard` leaves transient render calculations cached after a card
+moves between zones. Powers are retained for every live or half-dead monster, but discarded once
+the engine marks a monster `is_gone`; their later animation-driven cleanup has no gameplay effect
+and otherwise creates a sampling race. It also translates the benchmark's
+maintenance-only `KEY CONFIRM` command into the tutorial's native completed-click state because
+Communication Mod's keyboard injection cannot close that overlay. It owns no content table and
 performs no transition or reward logic.
+
+Tutorial flags, content unlocks, and boss-seen flags are mutable Steam-profile state, not seed
+state. The observer disables all first-time tutorials, fully unlocks content, and marks the nine
+seeded bosses as seen before every `START`. Without that normalization, the same numeric seed can
+have a different card/relic pool or can be forced onto the next unseen boss after an earlier run
+updates the profile. The `KEY CONFIRM` maintenance hook remains as a guarded fallback for an
+overlay opened by another mod or a future game change. Workers must use a dedicated profile because
+the unlock normalization is intentionally persistent.
 
 ## Training deployment
 
