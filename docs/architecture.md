@@ -47,6 +47,30 @@ The run manifest stores the requested display seed and the numeric seed reported
 trajectory stores every model-visible state, its SHA-256 hash, all raw model attempts, the selected
 action, the exact engine command, and the resulting state hash.
 
+## Local process supervision
+
+The unattended supervisor treats each seed as an isolated process attempt. It starts a fresh
+controller, waits for the listener-ready signal, launches a fresh modded game process, enforces an
+episode deadline, and terminates the whole game process group before the next attempt. Finalized
+`manifest.json` plus `outcome.json` pairs are the resume authority; the mutable status file is only
+an operational view. Resume matching includes model identity, character, ascension, and seed-set
+version so an artifact from a different benchmark configuration cannot silently skip work.
+
+CommunicationMod's `runAtGameStart` property is changed atomically around the supervised session.
+The original config bytes and file mode are restored on normal completion, failure, or interrupt.
+Per-attempt controller and game logs, retry history, current seed, and finalized run path are
+written atomically to the status tree. Model credentials remain in the controller environment;
+explicit secret command arguments are redacted from durable status.
+
+## Visible replay and video
+
+Replay reissues the recorded engine-command sequence against a newly seeded real game and verifies
+the state hash on both sides of every transition. Video capture is observational: recorder timing
+callbacks never enter the normalized game state or action loop. The generated SRT timeline records
+the wall-clock start of each verified action. Pillow renders transparent caption cards, and FFmpeg
+composites those cards over the system capture after the authoritative replay has finished. The raw
+capture and SRT remain available independently of the presentation render.
+
 ## Hidden information
 
 CommunicationMod includes the draw pile as an ordered Java collection. That is more information

@@ -157,6 +157,30 @@ Each decision uses an ephemeral, read-only Codex process in an empty temporary d
 are labeled `codex-cli/<model>` because the Codex agent has additional system context; do not rank
 them as direct-API model results in a canonical leaderboard.
 
+For unattended runs, use the supervisor instead of `eval` directly:
+
+```bash
+uv run sts-bench overnight \
+  --backend codex-cli \
+  --model gpt-5.6-terra \
+  --reasoning-effort low \
+  --seed-set v1 \
+  --runs-dir runs/benchmark-v1
+```
+
+On macOS with the conventional Steam Workshop installation, `overnight` finds the game,
+ModTheSpire, and CommunicationMod config automatically. It enables bridge autostart only while it
+is running, launches a fresh game process for each seed, applies a four-hour per-episode timeout,
+retries crashes up to three times, prevents system sleep, and restores the exact original config
+on exit. A rerun resumes only finalized artifacts matching the exact model, character, ascension,
+and seed-set version. Durable progress and per-attempt logs live in
+`<runs-dir>/overnight-status.json` and `<runs-dir>/_overnight/`.
+
+Use `--dry-run` to inspect what would be skipped or launched. On another platform or a nonstandard
+install, provide `--game-command`, `--game-cwd`, and `--communication-config` explicitly. API keys
+and bridge tokens inherited from the environment never enter the status file; explicit secret
+arguments are redacted there.
+
 Build leaderboard artifacts afterward:
 
 ```bash
@@ -169,17 +193,27 @@ remain visible sub-metrics.
 
 ## Replay and record a model playing
 
-Return the game to its main menu, start a replay listener, then restart the bridge from the mod
-panel:
+The macOS one-command demo path launches the game, records the main display, checks every replayed
+state, and burns the model's selected action plus current act, floor, and HP into the output:
 
 ```bash
-uv run sts-bench replay runs/<run-id> --step-delay 0.15
+uv run sts-bench replay runs/<run-id> \
+  --launch-game \
+  --record-display 1 \
+  --step-delay 0.15 \
+  --video-output demo.mp4
 ```
 
-The replay checks the recorded state hash before and after every command. To capture the visible
-game, install ffmpeg, identify your screen/window input, and supply a recorder command containing
-`{output}`. For example, on macOS first list AVFoundation devices with
-`ffmpeg -f avfoundation -list_devices true -i ""`, then run:
+Grant the terminal or host app macOS **Screen & System Audio Recording** permission and relaunch it
+before recording. This path uses the system `screencapture` utility and requires `ffmpeg`; the
+project's Pillow dependency renders the timestamped action card before FFmpeg composites a broadly
+playable H.264 MP4. The raw `.mov`, recorder log, and `.srt` remain beside the final video for
+debugging and re-editing. A `.replay.json` sidecar records the hash-verification result before
+presentation rendering begins, so a codec failure cannot discard the authoritative replay result.
+
+The replay checks the recorded state hash before and after every command. Without `--launch-game`,
+start the bridge from CommunicationMod's mod panel after the listener appears. For another capture
+backend, supply a recorder command containing `{output}`:
 
 ```bash
 uv run sts-bench replay runs/<run-id> \
@@ -188,8 +222,8 @@ uv run sts-bench replay runs/<run-id> \
 ```
 
 On Linux, use an ffmpeg `x11grab`/PipeWire input; on Windows, use `gdigrab` or an OBS command-line
-workflow. The recorder is started without a shell and stopped with `SIGINT` so ffmpeg finalizes
-the MP4.
+workflow. The recorder is started without a shell, kept alive with an open input pipe, and stopped
+with `q` (then `SIGINT` as a fallback) so the container is finalized cleanly.
 
 ## Determinism proof
 
@@ -237,7 +271,7 @@ rollouts waiting for a lease.
 - Published runs should enable the source-only Sts Bench Observer companion mod; standard
   Communication Mod omits card rules text and live damage/block/magic values. Runs without it are
   useful for transport testing but do not meet the benchmark's observation-completeness bar.
-- The standalone `eval` CLI drives one worker sequentially. The `verifiers.v1` adapter has a
+- `overnight` supervises one visible local worker at a time. The `verifiers.v1` adapter has a
   concurrent worker pool, but provisioning and supervising multiple graphical game processes is
   still a self-hosted operational responsibility.
 

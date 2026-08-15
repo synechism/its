@@ -9,6 +9,7 @@ authors = [{ name = "Abhi" }]
 keywords = ["benchmark", "llm", "reinforcement-learning", "slay-the-spire"]
 dependencies = [
   "openai>=2.9,<3",
+  "pillow>=11,<13",
 ]
 
 [project.optional-dependencies]
