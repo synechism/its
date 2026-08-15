@@ -19,6 +19,10 @@ from sts_bench.game_process import (
 )
 
 
+class BackendUnavailableError(RuntimeError):
+    """A backend-wide failure that retries or later seeds cannot resolve."""
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -134,6 +138,26 @@ def _redacted(command: list[str]) -> list[str]:
     return result
 
 
+def _controller_exit_error(return_code: int, log_path: Path) -> RuntimeError:
+    try:
+        log_tail = log_path.read_text(encoding="utf-8", errors="replace")[-12_000:]
+    except OSError:
+        log_tail = ""
+    non_retryable_markers = (
+        "you've hit your usage limit",
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+    )
+    for line in reversed(log_tail.splitlines()):
+        if any(marker in line.lower() for marker in non_retryable_markers):
+            detail = line.strip()
+            prefix = "RuntimeError: "
+            if detail.startswith(prefix):
+                detail = detail[len(prefix) :]
+            return BackendUnavailableError(detail)
+    return RuntimeError(f"controller exited with {return_code}")
+
+
 def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
     if config.max_attempts < 1:
         raise ValueError("max_attempts must be positive")
@@ -168,9 +192,7 @@ def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
         "ascension": config.ascension,
         "benchmark_version": config.benchmark_version,
         "seeds": list(config.seeds),
-        "completed": {
-            seed: str(existing[seed]) for seed in config.seeds if seed in existing
-        },
+        "completed": {seed: str(existing[seed]) for seed in config.seeds if seed in existing},
         "pending": pending,
         "failed": {},
         "attempts": [],
@@ -246,7 +268,7 @@ def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
                                     ) from None
                             reader.join(timeout=5)
                             if return_code != 0:
-                                raise RuntimeError(f"controller exited with {return_code}")
+                                raise _controller_exit_error(return_code, controller_log)
 
                         matches = completed_runs(
                             config.runs_dir,
@@ -280,6 +302,8 @@ def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
                             }
                         )
                         print(f"[{seed}] attempt {attempt} failed: {error}", file=sys.stderr)
+                        if isinstance(error, BackendUnavailableError):
+                            raise
                     finally:
                         if controller is not None:
                             terminate_process(controller)

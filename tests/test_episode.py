@@ -6,7 +6,7 @@ from collections import deque
 import pytest
 
 from sts_bench.episode import EpisodeConfig, play_episode
-from sts_bench.evaluator import _codex_usage
+from sts_bench.evaluator import _codex_failure_detail, _codex_usage
 from sts_bench.game import LiveGame
 from sts_bench.models import ModelReply
 from sts_bench.transport import WireError
@@ -43,6 +43,23 @@ def test_codex_cli_usage_parser() -> None:
         ]
     )
     assert _codex_usage(events) == (120, 18)
+
+
+def test_codex_cli_failure_prefers_structured_stdout_error() -> None:
+    stdout = b"\n".join(
+        [
+            b'{"type":"thread.started","thread_id":"test"}',
+            b'{"type":"error","message":"You have hit your usage limit."}',
+            b'{"type":"turn.failed","error":{"message":"You have hit your usage limit."}}',
+        ]
+    )
+    stderr = b"WARN state db discrepancy"
+
+    assert _codex_failure_detail(stdout, stderr) == "You have hit your usage limit."
+
+
+def test_codex_cli_failure_falls_back_to_stderr() -> None:
+    assert _codex_failure_detail(b"not json", b"useful stderr") == "useful stderr"
 
 
 @pytest.mark.asyncio

@@ -158,3 +158,65 @@ def test_supervisor_launches_game_finalizes_seed_and_restores_config(tmp_path: P
     assert status["completed"]["SEED1"].endswith("fake-SEED1")
     assert status["attempts"][0]["state"] == "completed"
     assert communication_config.read_text(encoding="utf-8") == original
+
+
+def test_supervisor_stops_without_consuming_retries_on_backend_quota(
+    tmp_path: Path,
+) -> None:
+    runs_dir = tmp_path / "runs"
+    counter = tmp_path / "counter.txt"
+    controller = tmp_path / "controller.py"
+    controller.write_text(
+        textwrap.dedent(
+            f"""
+            from pathlib import Path
+
+            counter = Path({str(counter)!r})
+            count = int(counter.read_text()) + 1 if counter.exists() else 1
+            counter.write_text(str(count))
+            print("Listening for a Slay the Spire worker on 127.0.0.1:17851.", flush=True)
+            raise RuntimeError("You've hit your usage limit. Try again later.")
+            """
+        ),
+        encoding="utf-8",
+    )
+    game = tmp_path / "game.py"
+    game.write_text("import time\ntime.sleep(60)\n", encoding="utf-8")
+    communication_config = tmp_path / "config.properties"
+    original = "runAtGameStart=false\n"
+    communication_config.write_text(original, encoding="utf-8")
+    status_file = tmp_path / "status.json"
+    config = OvernightConfig(
+        seeds=("SEED1", "SEED2"),
+        model="model-a",
+        backend="codex-cli",
+        character="Ironclad",
+        ascension=0,
+        runs_dir=runs_dir,
+        benchmark_version="v1",
+        status_file=status_file,
+        max_attempts=3,
+        startup_timeout=2,
+        episode_timeout=2,
+        restart_delay=0,
+        resume=True,
+        caffeinate=False,
+        controller_base=(sys.executable, str(controller)),
+        game_command=f"{sys.executable} {game}",
+        game_cwd=tmp_path,
+        communication_config=communication_config,
+    )
+
+    try:
+        run_overnight(config)
+    except RuntimeError as error:
+        assert "usage limit" in str(error)
+    else:
+        raise AssertionError("backend quota error should interrupt the supervisor")
+
+    status = json.loads(status_file.read_text(encoding="utf-8"))
+    assert status["state"] == "interrupted"
+    assert status["pending"] == ["SEED1", "SEED2"]
+    assert len(status["attempts"]) == 1
+    assert counter.read_text() == "1"
+    assert communication_config.read_text(encoding="utf-8") == original

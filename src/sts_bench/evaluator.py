@@ -86,6 +86,32 @@ def _codex_usage(events: str) -> tuple[int, int]:
     return tokens_in, tokens_out
 
 
+def _codex_failure_detail(stdout: bytes, stderr: bytes) -> str:
+    """Prefer structured Codex errors over incidental stderr warnings."""
+    messages: list[str] = []
+    stdout_text = stdout.decode("utf-8", errors="replace")
+    for line in stdout_text.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message: Any = None
+        if event.get("type") == "error":
+            message = event.get("message")
+        elif event.get("type") == "turn.failed":
+            error = event.get("error") or {}
+            if isinstance(error, dict):
+                message = error.get("message")
+        if message and str(message) not in messages:
+            messages.append(str(message))
+    if messages:
+        return " | ".join(messages)[-2000:]
+
+    stderr_text = stderr.decode("utf-8", errors="replace").strip()
+    fallback = stderr_text or stdout_text.strip() or "no diagnostic output"
+    return fallback[-2000:]
+
+
 class CodexCliModel:
     """Ephemeral, read-only Codex CLI backend for provisional local evaluations."""
 
@@ -152,7 +178,7 @@ class CodexCliModel:
                     f"Codex CLI model call timed out after {self.config.timeout:g} seconds"
                 ) from None
             if process.returncode != 0:
-                detail = stderr.decode("utf-8", errors="replace").strip()[-2000:]
+                detail = _codex_failure_detail(stdout, stderr)
                 raise RuntimeError(
                     f"Codex CLI model call exited with {process.returncode}: {detail}"
                 )
