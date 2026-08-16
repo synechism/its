@@ -1,6 +1,6 @@
 # sts-bench
 
-This is a benchmark and RL-env for one of my favorite roguelikes in the last few years, Slay the Spire. I had intended to do a GRPO run after benchmarking a couple of the frontier models, but it turns out current models can already beat the game! There is a fair amount of variance depending on your seed, i.e. on one seed 5.6 Luna failed on floor 14, on another it reached floor 50 and failed on the final boss. 5.6 Sol seems to beat the game quite reliably though. 
+This is a benchmark and RL-env for one of my favorite roguelikes in the last few years, Slay the Spire. I had intended to do a GRPO run after benchmarking a couple of the frontier models, but it turns out current models can already beat the game (only at A0 though)! There is a fair amount of variance depending on your seed, i.e. on one seed 5.6 Luna failed on floor 14, on another it reached floor 50 and failed on the final boss. 5.6 Sol seems to beat the game quite reliably though. Next order of business will be to up the difficulty to A10 and see what happens.
 
 
 
