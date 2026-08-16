@@ -18,7 +18,7 @@ You need:
 5. Python 3.11–3.14 and [uv](https://docs.astral.sh/uv/).
 
 ```bash
-git clone git@github.com:synechism/its.git
+git clone git@github.com:synechism/sts.git
 cd its
 uv sync --extra dev
 ```
