@@ -157,6 +157,39 @@ Each decision uses an ephemeral, read-only Codex process in an empty temporary d
 are labeled `codex-cli/<model>` because the Codex agent has additional system context; do not rank
 them as direct-API model results in a canonical leaderboard.
 
+### Preliminary frontier-model result
+
+On August 16, 2026, `codex-cli/gpt-5.6-sol` at high reasoning effort completed the frozen
+`STSBENCHV1002` seed as Ironclad at Ascension 0. This is an actual game-derived victory, not a
+simulator score or LLM-judged result.
+
+| Metric | `gpt-5.6-sol` high | `gpt-5.6-terra` low |
+| --- | ---: | ---: |
+| Result | **Victory** | Defeat |
+| Floor reached | **51** | 50 |
+| Score | **713** | 576 |
+| Acts / bosses cleared | **3 / 3** | 2 / 2 |
+| Elites killed | 4 | 5 |
+| Model decisions | 896 | 838 |
+| Illegal actions / forced defaults | **0 / 0** | 1 / 0 |
+| Episode runtime | **2h 26m** | approximately 1h 55m |
+| Recorded input / output tokens | 21,144,518 / 225,546 | 19,238,005 / 194,977 |
+
+The winning deck used a `Corruption+` / `Dark Embrace+` / `Dead Branch` exhaust engine, backed by
+`Power Through+`, `Second Wind+`, `Disarm+`, two copies of `Reaper`, and upgraded attacks. It
+defeated Awakened One and ended the run at 22/80 HP. Both columns used the same game/mod build,
+seed, character, ascension, temperature (`0`), two-turn history window, and 1,200-decision cap;
+the model tier and reasoning effort changed together, so this comparison does not isolate either
+factor.
+
+The supervisor's first Sol-high attempt encountered an upstream CommunicationMod transition edge
+after the Cursed Tome reward and restarted the seed from floor 0. The table reports the clean,
+completed second attempt; total supervised wall time including the interrupted attempt was 3h
+17m. One victory establishes that a frontier model can solve this A0 task, and suggests that this
+configuration may be near the ceiling for single-run capability. It does not establish benchmark
+saturation or a reliable win rate: repeated runs on frozen seeds are still needed to separate
+seed difficulty from policy variance.
+
 For unattended runs, use the supervisor instead of `eval` directly:
 
 ```bash
