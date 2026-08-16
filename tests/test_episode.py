@@ -257,6 +257,34 @@ async def test_observer_requirement_fails_before_first_model_call(
 
 
 @pytest.mark.asyncio
+async def test_requested_ascension_is_verified_before_first_model_call(
+    menu_envelope: dict, combat_envelope: dict
+) -> None:
+    connection = FakeConnection([menu_envelope, combat_envelope])
+    game = LiveGame(connection)  # type: ignore[arg-type]
+
+    async def model_must_not_run(*_args) -> ModelReply:
+        raise AssertionError("ascension preflight must happen before the model call")
+
+    with pytest.raises(
+        RuntimeError,
+        match="game started at ascension 0, requested 20",
+    ):
+        await play_episode(
+            EpisodeConfig(
+                seed="STSBENCHV1005",
+                model="test-model",
+                ascension=20,
+                max_decisions=1,
+            ),
+            model_must_not_run,
+            game=game,
+        )
+
+    assert connection.commands == ["START IRONCLAD 20 STSBENCHV1005"]
+
+
+@pytest.mark.asyncio
 async def test_interrupted_episode_writes_diagnostic_artifact(
     tmp_path, menu_envelope: dict, combat_envelope: dict
 ) -> None:

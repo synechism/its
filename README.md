@@ -1,6 +1,6 @@
 # sts-bench
 
-This is a benchmark and RL-env for one of my favorite roguelikes in the last few years, Slay the Spire. I had intended to do a GRPO run after benchmarking a couple of the frontier models, but it turns out current models can already beat the game (only at A0 though)! There is a fair amount of variance depending on your seed, i.e. on one seed 5.6 Luna failed on floor 14, on another it reached floor 50 and failed on the final boss. 5.6 Sol seems to beat the game quite reliably though. Next order of business will be to up the difficulty to A10 and see what happens.
+This is a benchmark and RL-env for one of my favorite roguelikes in the last few years, Slay the Spire. I had intended to do a GRPO run after benchmarking a couple of the frontier models, but it turns out current models can already beat the game (only at A0 though)! There is a fair amount of variance depending on your seed, i.e. on one seed 5.6 Luna failed on floor 14, on another it reached floor 50 and failed on the final boss. 5.6 Sol seems to beat the game quite reliably though. Next order of business is an A20 probe, with A10 on the same seed only if A20 loses.
 
 
 
@@ -103,4 +103,38 @@ The winning deck used a `Corruption+` / `Dark Embrace+` / `Dead Branch` exhaust 
 `Power Through+`, `Second Wind+`, `Disarm+`, two copies of `Reaper`, and upgraded attacks.
 
 
+### Frozen ascension scout
 
+The next capability probe freezes `codex-cli/gpt-5.6-sol` at high reasoning effort, Ironclad, and
+the previously unobserved v1 seed `STSBENCHV1005`. It runs A20 first. A10 is run on that same seed
+only if A20 loses, avoiding both an unnecessary multi-hour run and a seed/difficulty confound. The
+existing A0 victory on `STSBENCHV1002` remains a capability anchor, not a matched-seed comparison.
+This one-seed scout locates rough benchmark headroom; it is not a win-rate estimate.
+
+The complete frozen matrix is in
+[`configs/eval/ascension-scout-v1.toml`](configs/eval/ascension-scout-v1.toml). Validate game/mod
+discovery and both exact commands without launching the game or calling the model:
+
+```bash
+uv run sts-ascension-scout check
+uv run sts-ascension-scout status
+```
+
+When an overnight window is ready, launch only A20:
+
+```bash
+uv run sts-ascension-scout a20
+```
+
+Afterward, `status` reports the game-derived result and the A10 gate. The next command refuses to
+start unless A20 has a completed defeat; `--force` is available only for an explicit change to the
+frozen rule.
+
+```bash
+uv run sts-ascension-scout a10
+```
+
+A20 and A10 artifacts are isolated under `runs/ascension-scout-v1/a20/` and `a10/`. The episode
+also verifies that the live game actually honored the requested Ascension before the first model
+call, preventing a locked or misconfigured profile from silently spending an overnight budget on
+the wrong difficulty.

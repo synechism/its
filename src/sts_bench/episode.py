@@ -57,6 +57,11 @@ async def play_episode(config: EpisodeConfig, respond: Responder, *, game: GameB
             "install/enable the companion mod before running model evaluations"
         )
     state = game.reset(config.seed, config.character, config.ascension)
+    if state.ascension != config.ascension:
+        raise RuntimeError(
+            f"game started at ascension {state.ascension}, requested {config.ascension}; "
+            "aborting before the first model call"
+        )
     if config.require_observer and not state.engine.get("observer_version"):
         raise RuntimeError(
             "worker observations do not include Sts Bench Observer card fields; "
