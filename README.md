@@ -46,8 +46,8 @@ You need:
 6. [FFmpeg](https://ffmpeg.org/) for optional screen recording and overlays.
 
 ```bash
-git clone git@github.com:synechism/its.git
-cd its
+git clone git@github.com:synechism/sts.git
+cd sts
 uv sync --extra dev
 ```
 
@@ -67,7 +67,7 @@ Launch the game with the three mods once so CommunicationMod creates its config.
 at the absolute bridge executable:
 
 ```properties
-command=/absolute/path/to/its/.venv/bin/sts-bench bridge --host 127.0.0.1 --port 17851 --game-version VERSION --mod-the-spire-version VERSION --base-mod-version VERSION --communication-mod-version 1.2.1
+command=/absolute/path/to/sts/.venv/bin/sts-bench bridge --host 127.0.0.1 --port 17851 --game-version VERSION --mod-the-spire-version VERSION --base-mod-version VERSION --communication-mod-version 1.2.1
 runAtGameStart=false
 verbose=false
 maxInitializationTimeout=30
@@ -145,7 +145,7 @@ A recorded trajectory can be replayed without another model call. Replay sends t
 commands to a freshly seeded real game and verifies the visible state hash before and after every
 transition:
 
-[Watch a 25-second verified real-game replay clip](https://github.com/synechism/its/releases/download/v0.1.0/sts-bench-sol-a15-demo-25s.mp4)
+[Watch a 25-second verified real-game replay clip](https://github.com/synechism/sts/releases/download/v0.1.0/sts-bench-sol-a15-demo-25s.mp4)
 from GPT-5.6 Sol's A15 victory. It uses the recorded model actions and makes no new model calls.
 
 ```bash
