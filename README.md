@@ -77,6 +77,16 @@ The unattended supervisor temporarily enables `runAtGameStart`, launches a fresh
 and restores the exact original config afterward. For a bridge reachable beyond localhost, set the
 same strong token on both sides; the controller refuses an unauthenticated non-loopback listener.
 
+Before a smoke test or overnight run, inspect the installation without launching the game:
+
+```bash
+uv run sts-bench doctor
+```
+
+`doctor` checks the supported Python version, game paths, all four required mod JARs, the
+CommunicationMod bridge command, idle config state, and optional video tooling. It is read-only.
+Use `--json` for automation and `--require-video` when FFmpeg is required for the planned run.
+
 ## Evaluate a model
 
 Any Chat Completions-compatible endpoint works:
@@ -138,6 +148,26 @@ uv run sts-bench aggregate \
 
 Ranks reset within each exact character/Ascension tier. Report tiny pilots as raw records such as
 `1/1`, never as estimated population win rates.
+
+Validate a completed run before using it in a report:
+
+```bash
+uv run sts-bench submission validate /path/to/run
+```
+
+To share a result, create a small privacy-scrubbed summary bundle:
+
+```bash
+uv run sts-bench submission export /path/to/run --output result.submission.tar.gz
+uv run sts-bench submission validate result.submission.tar.gz
+```
+
+The default bundle excludes the trajectory and removes local worker IDs, PIDs, private endpoint
+URLs, and secret-like fields. `--include-trajectory` creates an independently hash-auditable bundle,
+but also includes raw model responses, prompts, and visible game text; use it only deliberately.
+Structural validation detects corruption and internal inconsistencies. It cannot prove which model
+ran or that the game/mod installation was unmodified. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for
+the frozen evaluation matrix and result-submission checklist.
 
 ## Real-game replay and video
 

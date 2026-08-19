@@ -12,6 +12,7 @@ from contextlib import ExitStack
 from pathlib import Path
 
 from sts_bench.aggregate import write_leaderboard, write_markdown
+from sts_bench.doctor import format_doctor_report, run_doctor
 from sts_bench.episode import EpisodeConfig, play_episode
 from sts_bench.evaluator import FirstLegalPolicy, ModelConfig, evaluate_model
 from sts_bench.game import LiveGame
@@ -31,6 +32,11 @@ from sts_bench.replay import (
     verify_determinism,
 )
 from sts_bench.seeds import load_seed_set
+from sts_bench.submission import (
+    export_submission,
+    format_validation_report,
+    validate_submission_path,
+)
 from sts_bench.transport import WorkerServer, run_bridge
 
 
@@ -344,6 +350,48 @@ def _aggregate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _doctor(args: argparse.Namespace) -> int:
+    report = run_doctor(
+        game_command=args.game_command,
+        game_cwd=args.game_cwd,
+        communication_config=args.communication_config,
+        mod_the_spire_jar=args.mod_the_spire_jar,
+        base_mod_jar=args.base_mod_jar,
+        communication_mod_jar=args.communication_mod_jar,
+        observer_jar=args.observer_jar,
+        require_video=args.require_video,
+    )
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+    else:
+        print(format_doctor_report(report))
+    return 0 if report.valid else 1
+
+
+def _submission(args: argparse.Namespace) -> int:
+    if args.submission_command == "validate":
+        report = validate_submission_path(args.path)
+        if args.json:
+            print(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        else:
+            print(format_validation_report(report))
+        return 0 if report.valid else 1
+    if args.submission_command == "export":
+        try:
+            output, report = export_submission(
+                args.run_dir,
+                args.output,
+                include_trajectory=args.include_trajectory,
+            )
+        except (OSError, ValueError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        print(format_validation_report(report))
+        print(f"WROTE: {output}")
+        return 0
+    raise AssertionError(args.submission_command)
+
+
 def _overnight(args: argparse.Namespace) -> int:
     seeds = tuple(_selected_seeds(args))
     if not seeds:
@@ -578,6 +626,43 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--seed", action="append", default=[])
     aggregate.add_argument("--ascension", action="append", type=int, default=[])
     aggregate.add_argument("--character", default=None)
+
+    doctor = subparsers.add_parser(
+        "doctor", help="check the local game, mods, bridge config, and video tools"
+    )
+    _add_game_launch(doctor, opt_in=False)
+    doctor.add_argument("--mod-the-spire-jar", type=Path, default=None)
+    doctor.add_argument("--base-mod-jar", type=Path, default=None)
+    doctor.add_argument("--communication-mod-jar", type=Path, default=None)
+    doctor.add_argument("--observer-jar", type=Path, default=None)
+    doctor.add_argument(
+        "--require-video",
+        action="store_true",
+        help="treat a missing FFmpeg installation as an error",
+    )
+    doctor.add_argument("--json", action="store_true", help="emit machine-readable diagnostics")
+
+    submission = subparsers.add_parser(
+        "submission", help="validate run artifacts or create a privacy-scrubbed public bundle"
+    )
+    submission_commands = submission.add_subparsers(dest="submission_command", required=True)
+    submission_validate = submission_commands.add_parser(
+        "validate", help="validate a run directory or exported submission bundle"
+    )
+    submission_validate.add_argument("path", type=Path)
+    submission_validate.add_argument(
+        "--json", action="store_true", help="emit a machine-readable validation report"
+    )
+    submission_export = submission_commands.add_parser(
+        "export", help="validate and export a privacy-scrubbed submission bundle"
+    )
+    submission_export.add_argument("run_dir", type=Path)
+    submission_export.add_argument("--output", type=Path, default=None)
+    submission_export.add_argument(
+        "--include-trajectory",
+        action="store_true",
+        help="include model responses and game text (off by default)",
+    )
     return parser
 
 
@@ -612,6 +697,10 @@ def main(argv: list[str] | None = None) -> int:
         return _replay(args, determinism=True)
     if args.command == "aggregate":
         return _aggregate(args)
+    if args.command == "doctor":
+        return _doctor(args)
+    if args.command == "submission":
+        return _submission(args)
     raise AssertionError(args.command)
 
 

@@ -18,3 +18,8 @@ Published videos, screenshots, leaderboards, or datasets may implicate platform 
 copyright, publicity, or research policies beyond source-code licensing. Obtain legal advice for
 commercial use or a public benchmark launch, provide clear attribution, avoid implying official
 endorsement, and honor valid rights-holder requests.
+
+Exported full-trajectory submissions can contain prompts, model responses, and player-visible game
+text. Summary-only submission bundles omit trajectories and are the default. Contributors are
+responsible for reviewing any artifact before sharing it and for having the right to distribute its
+contents.
