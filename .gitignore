@@ -4,6 +4,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 dist/
+.training/
+data/sft/*.jsonl
+outputs/
 build/
 *.egg-info/
 artifacts/

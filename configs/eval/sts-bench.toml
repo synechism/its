@@ -1,23 +1,25 @@
-# Load with StsBenchEnvConfig.from_toml(path), then pass to load_environment(config).
-# Model endpoint and sampling configuration belong to the verifiers/prime-rl runner.
+# Current Verifiers v1 environment config. The model/client are supplied by `eval`.
+[taskset]
+id = "sts-bench"
 seed_set = "v1"
 limit = 5
 character = "Ironclad"
 ascension = 0
 max_decisions = 1200
 retry_budget = 2
-runs_dir = "runs"
+
+[agent]
+max_turns = 3600
+
+[agent.harness]
+id = "sts-bench"
+runs_dir = "runs/verifiers-eval"
+worker_host = "127.0.0.1"
+worker_port = 17851
+worker_token_env = "STS_BENCH_TOKEN"
+worker_state_timeout = 120.0
 history_turns = 2
 require_observer = true
 
-# Every local game bridge connects to this shared pool listener.
-worker_host = "127.0.0.1"
-worker_port = 17851
-worker_token = ""
-worker_state_timeout = 120.0
-
-[taskset]
-taskset_id = "sts-bench-v1"
-
-[harness]
-max_turns = 3600
+[agent.runtime]
+type = "subprocess"

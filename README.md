@@ -198,14 +198,23 @@ uv run sts-bench verify-determinism /path/to/run --launch-game
 
 ## RL environment
 
-Install the optional training adapter on Python 3.11–3.13 with `uv sync --extra training`.
-`verifiers` 0.1.x does not yet import on Python 3.14; the benchmark, evaluator, and artifact tools
-do. The `verifiers.v1` environment in `sts_bench.environment` exposes sparse victory reward plus
-floor, boss, and legality metrics while leasing authoritative game workers from a local pool.
-Evaluation and video need one visible worker; large-scale RL requires a pool of licensed
+Install the pinned training adapter on Python 3.11–3.13 with
+`uv sync --extra training --python 3.13`. The core benchmark and artifact tools continue to support
+Python 3.14. The current Verifiers v1 plugin exports a typed Taskset, Harness, and custom Env: the env
+server owns the authoritative worker pool, intercepted model calls become native PrimeRL traces, and
+the task records sparse victory reward plus floor, boss, and legality metrics.
+
+Training uses 64 frozen `train-v1` seeds and 16 disjoint `train-eval-v1` seeds; neither public
+benchmark set is used for optimization. A pinned PrimeRL bootstrap, one-step integration config,
+SFT-data exporter, and GPU/Mac deployment guide are in [`docs/training.md`](docs/training.md). The
+GRPO advantage and loss implementation is intentionally left at that documented handoff so it can
+be implemented as the learning exercise.
+
+Evaluation and video need one visible worker; larger-scale RL requires a pool of licensed
 installations or a separately validated fast simulator. The actual game remains the gold-standard
 evaluator.
 
 See [`docs/architecture.md`](docs/architecture.md) for the trust boundary, hidden-information
-policy, replay contract, process supervision, and training topology. See [`LEGAL.md`](LEGAL.md) for
-the project's clean-room and user-owned-copy requirements.
+policy, replay contract, process supervision, and training topology. See [`docs/training.md`](docs/training.md)
+for the reproducible training stack and [`LEGAL.md`](LEGAL.md) for the project's clean-room and
+user-owned-copy requirements.

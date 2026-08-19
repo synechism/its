@@ -1,0 +1,24 @@
+# Export data first with `sts-bench export-sft ... --output data/sft/sts-bench.jsonl`.
+max_steps = 20
+
+[run]
+name = "sts-bench-action-sft"
+
+[deployment]
+num_train_gpus = 1
+
+[model]
+name = "Qwen/Qwen3-1.7B"
+
+[data]
+name = "data/sft/sts-bench.jsonl"
+seq_len = 8192
+batch_size = 32
+micro_batch_size = 1
+shuffle = true
+
+[optim]
+lr = 1e-5
+
+[ckpt]
+interval = 20

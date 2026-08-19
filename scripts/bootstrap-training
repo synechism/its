@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+prime_commit="1c0720d9753cd9c314b882c2020c19c47b82f78c"
+verifiers_commit="02cc940d8f319cb518556683b31f1e0ecaed827e"
+repo_root="$(cd "$(dirname "$0")/.." && pwd)"
+target="${1:-$repo_root/.training/prime-rl}"
+
+if [[ -e "$target" ]]; then
+  echo "refusing to modify existing target: $target" >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$target")"
+git clone --filter=blob:none --no-checkout https://github.com/PrimeIntellect-ai/prime-rl.git "$target"
+git -C "$target" fetch --depth 1 origin "$prime_commit"
+git -C "$target" checkout --detach "$prime_commit"
+# PrimeRL's uv workspace directly references every one of these submodules.
+# Use HTTPS so a fresh training host does not also need GitHub SSH credentials.
+git -C "$target" config submodule.verifiers.url https://github.com/PrimeIntellect-ai/verifiers.git
+git -C "$target" config submodule.renderers.url https://github.com/PrimeIntellect-ai/renderers.git
+git -C "$target" config submodule.prime-envs.url https://github.com/PrimeIntellect-ai/prime-envs.git
+git -C "$target" config submodule.pydantic-config.url https://github.com/PrimeIntellect-ai/pydantic-config.git
+git -C "$target" submodule update --init --recursive --depth 1
+
+actual_verifiers="$(git -C "$target/deps/verifiers" rev-parse HEAD)"
+if [[ "$actual_verifiers" != "$verifiers_commit" ]]; then
+  echo "unexpected Verifiers revision: $actual_verifiers" >&2
+  exit 1
+fi
+
+uv sync --project "$target" --python 3.12
+uv pip install --python "$target/.venv/bin/python" --no-deps --editable "$repo_root"
+"$target/.venv/bin/python" -c 'import sts_bench, verifiers.v1; print("sts-bench plugin import: ok")'
+
+echo "PrimeRL training workspace ready at $target"
+echo "Validate config: uv run --project $target rl @ $repo_root/configs/train/prime-rl-one-step.toml --dry-run"

@@ -13,7 +13,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-training = ["verifiers>=0.1.14,<0.2"]
+training = [
+  "verifiers @ git+https://github.com/PrimeIntellect-ai/verifiers.git@02cc940d8f319cb518556683b31f1e0ecaed827e ; python_version < '3.14'",
+]
 dev = [
   "pytest>=8.4,<10",
   "pytest-asyncio>=1.2,<2",
@@ -30,6 +32,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sts_bench"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

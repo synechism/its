@@ -1,0 +1,14 @@
+{
+  "benchmark": "sts-bench",
+  "version": "train-eval-v1",
+  "frozen_at": "2026-08-19",
+  "status": "training-held-out",
+  "engine": "Slay the Spire 1 through CommunicationMod",
+  "character": "Ironclad",
+  "seeds": [
+    "STSEVAL0000", "STSEVAL0001", "STSEVAL0002", "STSEVAL0003",
+    "STSEVAL0004", "STSEVAL0005", "STSEVAL0006", "STSEVAL0007",
+    "STSEVAL0008", "STSEVAL0009", "STSEVAL0010", "STSEVAL0011",
+    "STSEVAL0012", "STSEVAL0013", "STSEVAL0014", "STSEVAL0015"
+  ]
+}

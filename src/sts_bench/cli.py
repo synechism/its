@@ -37,6 +37,7 @@ from sts_bench.submission import (
     format_validation_report,
     validate_submission_path,
 )
+from sts_bench.training_data import export_sft_dataset
 from sts_bench.transport import WorkerServer, run_bridge
 
 
@@ -392,6 +393,19 @@ def _submission(args: argparse.Namespace) -> int:
     raise AssertionError(args.submission_command)
 
 
+def _export_sft(args: argparse.Namespace) -> int:
+    stats = export_sft_dataset(
+        args.input,
+        args.output,
+        outcome=args.outcome,
+        include_reasoning=args.include_reasoning,
+        allow_benchmark_seeds=args.allow_benchmark_seeds,
+    )
+    print(json.dumps(stats.to_dict(), indent=2, sort_keys=True))
+    print(f"wrote {args.output}")
+    return 0
+
+
 def _overnight(args: argparse.Namespace) -> int:
     seeds = tuple(_selected_seeds(args))
     if not seeds:
@@ -663,6 +677,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include model responses and game text (off by default)",
     )
+
+    export_sft = subparsers.add_parser(
+        "export-sft", help="convert legal recorded decisions into chat-format SFT JSONL"
+    )
+    export_sft.add_argument(
+        "input",
+        nargs="+",
+        type=Path,
+        help="run directories or roots recursively containing run directories",
+    )
+    export_sft.add_argument("--output", type=Path, required=True)
+    export_sft.add_argument(
+        "--outcome",
+        choices=("wins", "losses", "all"),
+        default="wins",
+        help="filter source runs (default: wins)",
+    )
+    export_sft.add_argument(
+        "--include-reasoning",
+        action="store_true",
+        help="retain each raw model response instead of normalizing to ACTION <index>",
+    )
+    export_sft.add_argument(
+        "--allow-benchmark-seeds",
+        action="store_true",
+        help="allow v1/v2 benchmark seeds (blocked by default to prevent data leakage)",
+    )
     return parser
 
 
@@ -701,6 +742,8 @@ def main(argv: list[str] | None = None) -> int:
         return _doctor(args)
     if args.command == "submission":
         return _submission(args)
+    if args.command == "export-sft":
+        return _export_sft(args)
     raise AssertionError(args.command)
 
 

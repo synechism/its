@@ -1,0 +1,86 @@
+# A deliberately tiny integration run. It validates one complete GRPO data path;
+# it is not a useful training budget. Change model/deployment for your GPU host.
+max_steps = 1
+seq_len = 32768
+
+[run]
+name = "sts-bench-grpo-one-step"
+
+[deployment]
+num_train_gpus = 1
+num_infer_gpus = 1
+
+[model]
+name = "Qwen/Qwen3-1.7B"
+
+[ckpt]
+interval = 1
+
+[monitors.file]
+
+[orchestrator]
+batch_size = 2
+group_size = 2
+
+[orchestrator.algo]
+# This is the replacement point for the GRPO implementation you are writing.
+# Keeping the upstream implementation selected makes the surrounding pipeline
+# executable while you develop and test your own algorithm in PrimeRL.
+type = "grpo"
+
+[orchestrator.train]
+# An untrained A15 policy will usually produce an all-loss group. Keep that
+# zero-signal group so the integration run reaches the trainer and checkpoint.
+filter_zero_advantages = false
+
+[[orchestrator.train.source]]
+name = "sts-bench-train-a15"
+
+[orchestrator.train.source.serve]
+# sts-bench owns a host TCP listener, so multiple env-server processes would
+# contend for the same port. Concurrency belongs inside this one process.
+max_concurrent = 2
+
+[orchestrator.train.source.serve.pool]
+type = "static"
+num_workers = 1
+
+[orchestrator.train.source.env.taskset]
+id = "sts-bench"
+seed_set = "train-v1"
+limit = 64
+character = "Ironclad"
+ascension = 15
+max_decisions = 1200
+retry_budget = 2
+
+[orchestrator.train.source.env.agent]
+max_turns = 3600
+
+[orchestrator.train.source.env.agent.timeout]
+rollout = 14400.0
+
+[orchestrator.train.source.env.agent.harness]
+id = "sts-bench"
+runs_dir = "runs/training"
+worker_host = "127.0.0.1"
+worker_port = 17851
+worker_token_env = "STS_BENCH_TOKEN"
+worker_state_timeout = 120.0
+history_turns = 2
+require_observer = true
+
+[orchestrator.train.source.env.agent.runtime]
+type = "subprocess"
+
+[orchestrator.train.sampling]
+temperature = 1.0
+max_completion_tokens = 768
+
+[orchestrator.renderer]
+name = "prime-qwen3"
+
+[trainer]
+
+[inference.vllm]
+data_parallel_size = 1

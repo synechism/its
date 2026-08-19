@@ -120,7 +120,14 @@ the unlock normalization is intentionally persistent.
 
 ## Training deployment
 
-For evaluation and video, a controller and one visible worker are enough. For GRPO, run a pool of
-licensed game installations and attach them to local `verifiers` tasks. Each task is still the same
-reset/observe/act loop. A future scheduler can lease workers without changing the public state,
-action, trajectory, or outcome schemas.
+For evaluation and video, a controller and one visible worker are enough. For GRPO, the Verifiers
+env server owns one process-local `WorkerPool`; every harness rollout leases a connected licensed
+game and every model call passes through Verifiers interception. PrimeRL can therefore run trainer,
+inference, and the env server on a Linux GPU machine while the Steam worker reaches the listener
+through an SSH tunnel from the Mac.
+
+The Verifiers server must use one process because the pool has one TCP listener. Concurrency is
+bounded inside that process and naturally backs up at `WorkerPool.acquire`; connecting additional
+licensed workers increases actual parallelism. Task loading remains data-only, so the orchestrator
+can load frozen seeds without starting or importing a game process. See [`training.md`](training.md)
+for pins, topology, configuration, and the GRPO implementation handoff.

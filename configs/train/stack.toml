@@ -1,0 +1,12 @@
+schema_version = 1
+frozen_at = "2026-08-19"
+python = "~=3.12.0"
+
+[prime_rl]
+repository = "https://github.com/PrimeIntellect-ai/prime-rl.git"
+commit = "1c0720d9753cd9c314b882c2020c19c47b82f78c"
+
+[verifiers]
+repository = "https://github.com/PrimeIntellect-ai/verifiers.git"
+commit = "02cc940d8f319cb518556683b31f1e0ecaed827e"
+source = "prime-rl deps/verifiers submodule"
