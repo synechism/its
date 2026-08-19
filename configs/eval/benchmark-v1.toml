@@ -1,0 +1,62 @@
+# Benchmark v1 freezes the protocol, not a population win-rate claim. The
+# STSBENCHV1005 runs below are calibration pilots. The untouched v2 seeds are
+# reserved for future evaluations funded or contributed by benchmark users.
+schema_version = 1
+benchmark_id = "sts-bench-v1"
+frozen_at = "2026-08-18"
+character = "Ironclad"
+calibration_seed = "STSBENCHV1005"
+evaluation_seed_set = "v2"
+
+[tiers.standard]
+ascension = 15
+description = "Frontier tier: Sol cleared the calibration run while Terra did not."
+
+[tiers.challenge]
+ascension = 16
+description = "Observed Sol boundary on the calibration seed."
+
+[tiers.maximum]
+ascension = 20
+description = "Canonical maximum Ascension; retained as a ceiling probe."
+
+[agent]
+backend = "codex-cli"
+reasoning_effort = "high"
+temperature = 0.0
+max_tokens = 768
+history_turns = 2
+model_timeout = 180.0
+max_decisions = 1200
+retry_budget = 2
+require_observer = true
+
+[[calibration_runs]]
+model = "gpt-5.6-sol"
+ascension = 10
+run_id = "20260817T141324.701783Z_codex-cli-gpt-5.6-sol_Ironclad_seedSTSBENCHV1005_asc10"
+
+[[calibration_runs]]
+model = "gpt-5.6-sol"
+ascension = 15
+run_id = "20260817T193641.826669Z_codex-cli-gpt-5.6-sol_Ironclad_seedSTSBENCHV1005_asc15"
+
+[[calibration_runs]]
+model = "gpt-5.6-terra"
+ascension = 15
+run_id = "20260818T195415.363254Z_codex-cli-gpt-5.6-terra_Ironclad_seedSTSBENCHV1005_asc15"
+
+[[calibration_runs]]
+model = "gpt-5.6-sol"
+ascension = 16
+run_id = "20260818T154750.746284Z_codex-cli-gpt-5.6-sol_Ironclad_seedSTSBENCHV1005_asc16"
+
+[[calibration_runs]]
+model = "gpt-5.6-sol"
+ascension = 17
+run_id = "20260818T133012.090381Z_codex-cli-gpt-5.6-sol_Ironclad_seedSTSBENCHV1005_asc17"
+
+[[calibration_runs]]
+model = "gpt-5.6-sol"
+ascension = 20
+run_id = "20260817T005900.749752Z_codex-cli-gpt-5.6-sol_Ironclad_seedSTSBENCHV1005_asc20"

@@ -127,14 +127,13 @@ def _wait_for_ready(
 
 def _redacted(command: list[str]) -> list[str]:
     result = list(command)
-    if "--api-key" in result:
-        index = result.index("--api-key")
-        if index + 1 < len(result):
-            result[index + 1] = "<redacted>"
-    if "--token" in result:
-        index = result.index("--token")
-        if index + 1 < len(result):
-            result[index + 1] = "<redacted>"
+    for flag in ("--api-key", "--token"):
+        if flag in result:
+            index = result.index(flag)
+            if index + 1 < len(result):
+                result[index + 1] = "<redacted>"
+        prefix = flag + "="
+        result = [prefix + "<redacted>" if value.startswith(prefix) else value for value in result]
     return result
 
 
@@ -155,7 +154,25 @@ def _controller_exit_error(return_code: int, log_path: Path) -> RuntimeError:
             if detail.startswith(prefix):
                 detail = detail[len(prefix) :]
             return BackendUnavailableError(detail)
+    if "TimeoutError: timed out" in log_tail:
+        return RuntimeError(
+            "controller transport timed out while waiting for the next game state; "
+            f"the attempt is retryable and its traceback is in {log_path}"
+        )
     return RuntimeError(f"controller exited with {return_code}")
+
+
+def _failure_kind(error: BaseException) -> str:
+    if isinstance(error, BackendUnavailableError):
+        return "backend_unavailable"
+    message = str(error).lower()
+    if "transport timed out" in message:
+        return "transport_timeout"
+    if "episode exceeded" in message:
+        return "episode_timeout"
+    if "did not become ready" in message:
+        return "startup_failure"
+    return "controller_failure"
 
 
 def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
@@ -299,6 +316,7 @@ def run_overnight(config: OvernightConfig, *, dry_run: bool = False) -> int:
                                 "state": "failed",
                                 "finished_at": _now(),
                                 "error": f"{type(error).__name__}: {error}",
+                                "failure_kind": _failure_kind(error),
                             }
                         )
                         print(f"[{seed}] attempt {attempt} failed: {error}", file=sys.stderr)

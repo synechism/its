@@ -1,0 +1,21 @@
+{
+  "benchmark": "sts-bench",
+  "version": "v2",
+  "frozen_at": "2026-08-18",
+  "status": "reserved-unobserved",
+  "engine": "Slay the Spire 1 through CommunicationMod",
+  "character": "Ironclad",
+  "tiers": [15, 16, 20],
+  "seeds": [
+    "STSBENCHV2000",
+    "STSBENCHV2001",
+    "STSBENCHV2002",
+    "STSBENCHV2003",
+    "STSBENCHV2004",
+    "STSBENCHV2005",
+    "STSBENCHV2006",
+    "STSBENCHV2007",
+    "STSBENCHV2008",
+    "STSBENCHV2009"
+  ]
+}

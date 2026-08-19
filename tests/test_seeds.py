@@ -10,3 +10,13 @@ def test_v1_seed_set_is_frozen_unique_and_communicationmod_safe() -> None:
     assert len(seeds) == 100
     assert len(set(seeds)) == 100
     assert all(re.fullmatch(r"[A-Z0-9]+", seed) for seed in seeds)
+
+
+def test_v2_seed_set_is_reserved_unique_and_disjoint_from_v1() -> None:
+    v1 = set(load_seed_set("v1"))
+    v2 = load_seed_set("v2")
+
+    assert len(v2) == 10
+    assert len(set(v2)) == 10
+    assert v1.isdisjoint(v2)
+    assert all(re.fullmatch(r"[A-Z0-9]+", seed) for seed in v2)

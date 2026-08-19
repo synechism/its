@@ -1,11 +1,38 @@
 # sts-bench
 
-This is a benchmark and RL-env for one of my favorite roguelikes in the last few years, Slay the Spire. I had intended to do a GRPO run after benchmarking a couple of the frontier models, but it turns out current models can already beat the game (only at A0 though)! There is a fair amount of variance depending on your seed, i.e. on one seed 5.6 Luna failed on floor 14, on another it reached floor 50 and failed on the final boss. 5.6 Sol seems to beat the game quite reliably though. Next order of business is an A20 probe, with A10 on the same seed only if A20 loses.
+`sts-bench` is a reproducible LLM benchmark and RL environment for a user-owned copy of
+Slay the Spire 1. Models play the authoritative game through semantic actions exposed by
+CommunicationMod; the benchmark does not reimplement cards, combat, maps, rewards, or scoring.
 
+The first calibration found a useful frontier. On the same Ironclad seed and agent settings,
+GPT-5.6 Sol cleared A15 while GPT-5.6 Terra died to the Act 2 boss. Sol then lost at A16, A17,
+and A20. These are single-run capability pilots, not population win-rate estimates.
 
+| Model | Ascension | Result | Floor | Score | Acts | Elites | Decisions |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| GPT-5.6 Sol high | A10 | **Victory** | 51 | 1,221 | 3 | 8 | 860 |
+| GPT-5.6 Sol high | A15 | **Victory** | 51 | 1,378 | 3 | 8 | 921 |
+| GPT-5.6 Terra high | A15 | Defeat | 33 | 495 | 1 | 3 | 632 |
+| GPT-5.6 Sol high | A16 | Defeat | 38 | 767 | 2 | 3 | 640 |
+| GPT-5.6 Sol high | A17 | Defeat | 16 | 218 | 0 | 2 | 257 |
+| GPT-5.6 Sol high | A20 | Defeat | 16 | 236 | 0 | 2 | 295 |
 
+The A15 victory took 2h 36m and used 21,014,427 recorded input tokens and 248,011 output
+tokens. Sol finished at 57/75 HP with a 38-card strength/self-damage deck built around two
+`Limit Break`s, `Rupture`, `J.A.X.`, `Reaper`, `Feed`, and `Blood for Blood+`, plus 17 relics.
+The trajectory contains 921 model decisions and 1,064 total engine transitions once automatic
+maintenance actions are included.
 
+All six calibration rows use `STSBENCHV1005`, Ironclad, temperature 0, two history turns, and
+the real game. Every selected action was legal and none used a forced default. The frozen protocol
+is in [`configs/eval/benchmark-v1.toml`](configs/eval/benchmark-v1.toml), and machine-readable
+results are in [`results/benchmark-v1.json`](results/benchmark-v1.json).
 
+An earlier A0 pilot provides context: Terra went 0/5 on seeds `STSBENCHV1000`–`1004`, ranging from
+floor 8 to floor 50, while Sol cleared `STSBENCHV1002`. Benchmark v1 therefore treats A15 as the
+standard frontier tier, A16 as a challenge tier, and A20 as a ceiling probe. Ten untouched v2
+seeds are frozen for future or community-funded evaluations; no claim is made about performance
+on them.
 
 ## Install
 
@@ -16,30 +43,28 @@ You need:
 3. [BaseMod](https://github.com/daviscook477/BaseMod).
 4. [CommunicationMod](https://github.com/ForgottenArbiter/CommunicationMod).
 5. Python 3.11–3.14 and [uv](https://docs.astral.sh/uv/).
+6. [FFmpeg](https://ffmpeg.org/) for optional screen recording and overlays.
 
 ```bash
-git clone git@github.com:synechism/sts.git
+git clone git@github.com:synechism/its.git
 cd its
 uv sync --extra dev
 ```
 
-For complete card observations, build the repository's source-only observer mod against your own
-installation and copy the resulting JAR into the game's `mods/` directory:
+Build the repository's source-only observer mod against your installation and copy the resulting
+JAR into the game's `mods/` directory:
 
 ```bash
 ./scripts/build-observer-mod /path/to/SlayTheSpire.app/Contents/Resources
 ```
 
-Enable **Sts Bench Observer** with BaseMod and Communication Mod. It patches only Communication
-Mod's card-to-JSON conversion, adding live rules text and dynamic damage/block/magic values from
-the authoritative `AbstractCard`. Live values are retained for actionable hand cards; stable base
-values are used for cards outside the hand so frame-timed render caches cannot change a replay
-hash. It also normalizes tutorials, unlock pools, and seen-boss flags before each seeded run. Use a
-dedicated benchmark profile: these unlocks persist in that profile. The observer contains no game
-assets, content database, or simulated rules.
+Enable **Sts Bench Observer** with BaseMod and CommunicationMod. The observer adds authoritative
+card text and live numeric values to CommunicationMod observations and normalizes tutorials,
+unlocks, and boss-seen flags before seeded runs. Use a dedicated benchmark profile because content
+unlocks persist in that profile. The repository contains no game assets or simulated rules.
 
-Launch the game with ModTheSpire, BaseMod, and CommunicationMod enabled once so the mod creates
-its config. Set its `command` to the **absolute** bridge executable, for example:
+Launch the game with the three mods once so CommunicationMod creates its config. Point `command`
+at the absolute bridge executable:
 
 ```properties
 command=/absolute/path/to/its/.venv/bin/sts-bench bridge --host 127.0.0.1 --port 17851 --game-version VERSION --mod-the-spire-version VERSION --base-mod-version VERSION --communication-mod-version 1.2.1
@@ -48,26 +73,9 @@ verbose=false
 maxInitializationTimeout=30
 ```
 
-The CommunicationMod README explains where its generated `SpireConfig` lives on each platform.
-With `runAtGameStart=false`, start the external process from CommunicationMod's in-game mod panel
-after the controller says it is listening. Alternatively, enable it and start the controller
-before launching the game. On Windows, follow Java properties escaping rules for backslashes and
-spaces.
-
-For a bridge reachable beyond localhost, set the same strong token on both sides:
-
-```properties
-command=/absolute/path/to/sts-bench bridge --host 10.0.0.5 --port 17851 --token LONG_RANDOM_TOKEN
-```
-
-```bash
-uv run sts-bench smoke --host 0.0.0.0 --token LONG_RANDOM_TOKEN
-```
-
-The controller refuses a non-loopback listener without a token. Do not expose the port directly
-to the public internet.
-
-
+The unattended supervisor temporarily enables `runAtGameStart`, launches a fresh game per attempt,
+and restores the exact original config afterward. For a bridge reachable beyond localhost, set the
+same strong token on both sides; the controller refuses an unauthenticated non-loopback listener.
 
 ## Evaluate a model
 
@@ -77,64 +85,95 @@ Any Chat Completions-compatible endpoint works:
 export OPENAI_API_KEY=...
 uv run sts-bench eval \
   --model gpt-5-mini \
-  --seed-set v1 \
-  --limit 5 \
+  --seed-set v2 \
+  --limit 1 \
   --character Ironclad \
-  --ascension 0
+  --ascension 15
 ```
 
-
-### Result
-
-
-| Metric | `gpt-5.6-sol` high | `gpt-5.6-terra` low |
-| --- | ---: | ---: |
-| Result | **Victory** | Defeat |
-| Floor reached | **51** | 50 |
-| Score | **713** | 576 |
-| Acts / bosses cleared | **3 / 3** | 2 / 2 |
-| Elites killed | 4 | 5 |
-| Model decisions | 896 | 838 |
-| Illegal actions / forced defaults | **0 / 0** | 1 / 0 |
-| Episode runtime | **2h 26m** | approximately 1h 55m |
-| Recorded input / output tokens | 21,144,518 / 225,546 | 19,238,005 / 194,977 |
-
-The winning deck used a `Corruption+` / `Dark Embrace+` / `Dead Branch` exhaust engine, backed by
-`Power Through+`, `Second Wind+`, `Disarm+`, two copies of `Reaper`, and upgraded attacks.
-
-
-### Frozen ascension scout
-
-The next capability probe freezes `codex-cli/gpt-5.6-sol` at high reasoning effort, Ironclad, and
-the previously unobserved v1 seed `STSBENCHV1005`. It runs A20 first. A10 is run on that same seed
-only if A20 loses, avoiding both an unnecessary multi-hour run and a seed/difficulty confound. The
-existing A0 victory on `STSBENCHV1002` remains a capability anchor, not a matched-seed comparison.
-This one-seed scout locates rough benchmark headroom; it is not a win-rate estimate.
-
-The complete frozen matrix is in
-[`configs/eval/ascension-scout-v1.toml`](configs/eval/ascension-scout-v1.toml). Validate game/mod
-discovery and both exact commands without launching the game or calling the model:
+Authenticated Codex CLI runs use `--backend codex-cli`. For a long local run, `--detach` starts the
+supervisor in a new process session so closing the terminal or client does not orphan the game:
 
 ```bash
-uv run sts-ascension-scout check
-uv run sts-ascension-scout status
+uv run sts-bench overnight \
+  --backend codex-cli \
+  --model gpt-5.6-sol \
+  --reasoning-effort high \
+  --seed-set v2 \
+  --limit 1 \
+  --character Ironclad \
+  --ascension 15 \
+  --runs-dir runs/sol-a15-v2 \
+  --detach
 ```
 
-When an overnight window is ready, launch only A20:
+`overnight-status.json` records the current seed, retry reason, attempt logs, finalized run path,
+and completion state. A transport timeout is retried with a fresh game and classified separately;
+only directories containing both `manifest.json` and `outcome.json` count as completed episodes.
+
+## Artifacts and reporting
+
+Each run records:
+
+- a versioned manifest with model, engine, seed, character, Ascension, and sampling settings;
+- every visible state and SHA-256 replay hash;
+- raw model responses, legal actions, chosen semantic command, and resulting state hash;
+- terminal outcome, score, progress, token counts, and action-integrity metrics;
+- a readable transcript.
+
+Aggregation is recursive and never combines different characters or Ascension levels. Generate the
+checked Benchmark v1 report from local artifacts with:
 
 ```bash
-uv run sts-ascension-scout a20
+uv run sts-bench aggregate \
+  --runs-dir runs \
+  --seed STSBENCHV1005 \
+  --model codex-cli/gpt-5.6-sol \
+  --model codex-cli/gpt-5.6-terra \
+  --ascension 10 --ascension 15 --ascension 16 --ascension 17 --ascension 20 \
+  --character Ironclad \
+  --output results/benchmark-v1.json \
+  --markdown results/benchmark-v1.md
 ```
 
-Afterward, `status` reports the game-derived result and the A10 gate. The next command refuses to
-start unless A20 has a completed defeat; `--force` is available only for an explicit change to the
-frozen rule.
+Ranks reset within each exact character/Ascension tier. Report tiny pilots as raw records such as
+`1/1`, never as estimated population win rates.
+
+## Real-game replay and video
+
+A recorded trajectory can be replayed without another model call. Replay sends the original engine
+commands to a freshly seeded real game and verifies the visible state hash before and after every
+transition:
+
+[Watch a 25-second verified real-game replay clip](https://github.com/synechism/its/releases/download/v0.1.0/sts-bench-sol-a15-demo-25s.mp4)
+from GPT-5.6 Sol's A15 victory. It uses the recorded model actions and makes no new model calls.
 
 ```bash
-uv run sts-ascension-scout a10
+uv run sts-bench replay /path/to/run \
+  --launch-game \
+  --record-display 1 \
+  --video-output artifacts/sol-a15-win.mp4 \
+  --video-speed 8
 ```
 
-A20 and A10 artifacts are isolated under `runs/ascension-scout-v1/a20/` and `a10/`. The episode
-also verifies that the live game actually honored the requested Ascension before the first model
-call, preventing a locked or misconfigured profile from silently spending an overnight budget on
-the wrong difficulty.
+The recorder writes a raw capture, an SRT action timeline, a replay-verification JSON file, and an
+MP4 with a model/action/progress overlay. `--video-speed` changes only the presentation render, not
+the authoritative replay.
+
+For a stronger determinism check, replay a terminal trajectory twice:
+
+```bash
+uv run sts-bench verify-determinism /path/to/run --launch-game
+```
+
+## RL environment
+
+Install the optional training adapter with `uv sync --extra training`. The `verifiers.v1`
+environment in `sts_bench.environment` exposes sparse victory reward plus floor, boss, and legality
+metrics while leasing authoritative game workers from a local pool. Evaluation and video need one
+visible worker; large-scale RL requires a pool of licensed installations or a separately validated
+fast simulator. The actual game remains the gold-standard evaluator.
+
+See [`docs/architecture.md`](docs/architecture.md) for the trust boundary, hidden-information
+policy, replay contract, process supervision, and training topology. See [`LEGAL.md`](LEGAL.md) for
+the project's clean-room and user-owned-copy requirements.

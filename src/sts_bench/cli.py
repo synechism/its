@@ -5,6 +5,7 @@ import asyncio
 import dataclasses
 import json
 import os
+import subprocess
 import sys
 import time
 from contextlib import ExitStack
@@ -71,6 +72,92 @@ def _selected_seeds(args: argparse.Namespace) -> list[str]:
     else:
         seeds = load_seed_set(args.seed_set)
     return seeds[: args.limit] if args.limit is not None else seeds
+
+
+def _without_detach_arguments(arguments: list[str]) -> list[str]:
+    """Remove parent-only detach flags before re-executing the overnight command."""
+    result: list[str] = []
+    index = 0
+    while index < len(arguments):
+        value = arguments[index]
+        if value == "--detach":
+            index += 1
+            continue
+        if value == "--detach-log":
+            index += 2
+            continue
+        if value.startswith("--detach-log="):
+            index += 1
+            continue
+        result.append(value)
+        index += 1
+    return result
+
+
+def _redacted_command(command: list[str]) -> list[str]:
+    redacted = list(command)
+    for flag in ("--api-key", "--token"):
+        if flag in redacted:
+            index = redacted.index(flag)
+            if index + 1 < len(redacted):
+                redacted[index + 1] = "<redacted>"
+        prefix = flag + "="
+        redacted = [
+            prefix + "<redacted>" if value.startswith(prefix) else value for value in redacted
+        ]
+    return redacted
+
+
+def _detach_overnight(args: argparse.Namespace, arguments: list[str]) -> int:
+    args.runs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = args.detach_log or args.runs_dir / "overnight.launch.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "sts_bench.cli",
+        *_without_detach_arguments(arguments),
+    ]
+    with log_path.open("ab") as log_handle:
+        process = subprocess.Popen(
+            command,
+            cwd=Path.cwd(),
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+            close_fds=True,
+        )
+    time.sleep(0.25)
+    if process.poll() is not None:
+        detail = log_path.read_text(encoding="utf-8", errors="replace")[-4_000:]
+        raise RuntimeError(
+            f"detached overnight process exited with {process.returncode}; see {log_path}\n{detail}"
+        )
+    launch_path = args.runs_dir / "detached-launch.json"
+    temporary = launch_path.with_suffix(launch_path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "pid": process.pid,
+                "started_at_unix": time.time(),
+                "command": _redacted_command(command),
+                "cwd": str(Path.cwd()),
+                "log": str(log_path),
+                "status": str(args.status_file or args.runs_dir / "overnight-status.json"),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(launch_path)
+    print(f"started detached overnight supervisor pid={process.pid}")
+    print(f"launch metadata: {launch_path}")
+    print(f"supervisor log: {log_path}")
+    return 0
 
 
 async def _eval(args: argparse.Namespace) -> int:
@@ -161,17 +248,32 @@ def _replay(args: argparse.Namespace, *, determinism: bool = False) -> int:
     return 0 if result.valid else 1
 
 
-def _run_replay_with_optional_recording(
-    game: LiveGame, args: argparse.Namespace
-) -> ReplayResult:
+def _macos_screen_recorder_command(display: int) -> str:
+    if display < 1:
+        raise ValueError("--record-display must be at least 1")
+    screen = display - 1
+    return (
+        "ffmpeg -hide_banner -loglevel info -y -f avfoundation "
+        "-capture_cursor 1 -framerate 20 -pixel_format nv12 "
+        f"-i 'Capture screen {screen}:none' -c:v h264_videotoolbox "
+        "-b:v 6M -pix_fmt yuv420p -fps_mode cfr -r 20 "
+        "-f mpegts -mpegts_flags +resend_headers {output}"
+    )
+
+
+def _run_replay_with_optional_recording(game: LiveGame, args: argparse.Namespace) -> ReplayResult:
+    if args.video_speed <= 0:
+        raise ValueError("--video-speed must be positive")
     if args.record_display is not None and args.recorder_command:
         raise ValueError("use either --record-display or --recorder-command, not both")
     command = args.recorder_command
     raw_output = args.video_output
     if args.record_display is not None:
+        if sys.platform != "darwin":
+            raise RuntimeError("--record-display currently requires macOS")
         if args.overlay:
-            raw_output = args.video_output.with_name(args.video_output.stem + ".raw.mov")
-        command = f"/usr/sbin/screencapture -v -x -D{args.record_display} {{output}}"
+            raw_output = args.video_output.with_name(args.video_output.stem + ".raw.ts")
+        command = _macos_screen_recorder_command(args.record_display)
     elif command and args.overlay:
         raw_output = args.video_output.with_name(
             args.video_output.stem + ".raw" + args.video_output.suffix
@@ -183,12 +285,25 @@ def _run_replay_with_optional_recording(
     with ExternalRecorder(command, raw_output) as recorder:
         started_at = recorder.started_at or time.monotonic()
         timeline = ReplayTimeline(started_at=started_at, model=str(manifest.get("model", "model")))
+
+        def record_step(index: int, total: int, row: dict, state) -> None:
+            recorder.ensure_running()
+            if args.overlay:
+                timeline.on_step(index, total, row, state)
+            if index == 0 or (index + 1) % 100 == 0 or index + 1 == total:
+                print(
+                    f"replay {index + 1}/{total}: act={state.act} "
+                    f"floor={state.floor_reached} hp={state.hp}/{state.max_hp}",
+                    flush=True,
+                )
+
         result = replay_live(
             game,
             args.run_dir,
             step_delay=args.step_delay,
-            on_step=timeline.on_step if args.overlay else None,
+            on_step=record_step,
         )
+        recorder.ensure_running()
     replay_result = args.video_output.with_suffix(args.video_output.suffix + ".replay.json")
     replay_result.parent.mkdir(parents=True, exist_ok=True)
     temporary = replay_result.with_suffix(replay_result.suffix + ".tmp")
@@ -197,15 +312,33 @@ def _run_replay_with_optional_recording(
         encoding="utf-8",
     )
     temporary.replace(replay_result)
+    if not result.valid:
+        print(
+            f"replay verification failed; preserving diagnostic capture at {raw_output}",
+            file=sys.stderr,
+        )
+        return result
     if args.overlay:
         subtitles = args.video_output.with_suffix(".srt")
         timeline.write_srt(subtitles)
-        burn_action_overlay(raw_output, subtitles, args.video_output)
+        burn_action_overlay(
+            raw_output,
+            subtitles,
+            args.video_output,
+            speed=args.video_speed,
+        )
     return result
 
 
 def _aggregate(args: argparse.Namespace) -> int:
-    payload = write_leaderboard(args.runs_dir, args.output)
+    payload = write_leaderboard(
+        args.runs_dir,
+        args.output,
+        models=args.model,
+        seeds=args.seed,
+        ascensions=args.ascension,
+        character=args.character,
+    )
     write_markdown(payload, args.markdown)
     print(f"wrote {args.output} and {args.markdown}")
     return 0
@@ -383,13 +516,20 @@ def build_parser() -> argparse.ArgumentParser:
     overnight.add_argument("--startup-timeout", type=float, default=90.0)
     overnight.add_argument("--episode-timeout", type=float, default=14_400.0)
     overnight.add_argument("--restart-delay", type=float, default=5.0)
-    overnight.add_argument(
-        "--resume", action=argparse.BooleanOptionalAction, default=True
-    )
-    overnight.add_argument(
-        "--caffeinate", action=argparse.BooleanOptionalAction, default=True
-    )
+    overnight.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
+    overnight.add_argument("--caffeinate", action=argparse.BooleanOptionalAction, default=True)
     overnight.add_argument("--dry-run", action="store_true")
+    overnight.add_argument(
+        "--detach",
+        action="store_true",
+        help="run the supervisor in a new process session and return immediately",
+    )
+    overnight.add_argument(
+        "--detach-log",
+        type=Path,
+        default=None,
+        help="parent-process log for --detach (defaults inside --runs-dir)",
+    )
 
     smoke = subparsers.add_parser("smoke", help="play one live run with a scripted policy")
     _add_worker_server(smoke)
@@ -407,13 +547,19 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="NUMBER",
-        help="record a macOS display with screencapture (1 is the main display)",
+        help="record a macOS display with FFmpeg/AVFoundation (1 is the main display)",
     )
     replay.add_argument(
         "--overlay",
         action=argparse.BooleanOptionalAction,
         default=True,
         help="burn model, progress, HP, and selected actions into the video",
+    )
+    replay.add_argument(
+        "--video-speed",
+        type=float,
+        default=1.0,
+        help="speed up the final video and overlay without changing replay execution",
     )
     _add_game_launch(replay, opt_in=True)
 
@@ -428,11 +574,16 @@ def build_parser() -> argparse.ArgumentParser:
     aggregate.add_argument("--runs-dir", type=Path, default=Path("runs"))
     aggregate.add_argument("--output", type=Path, default=Path("leaderboard.json"))
     aggregate.add_argument("--markdown", type=Path, default=Path("leaderboard.md"))
+    aggregate.add_argument("--model", action="append", default=[])
+    aggregate.add_argument("--seed", action="append", default=[])
+    aggregate.add_argument("--ascension", action="append", type=int, default=[])
+    aggregate.add_argument("--character", default=None)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    args = build_parser().parse_args(arguments)
     if args.command == "bridge":
         run_bridge(
             args.host,
@@ -450,6 +601,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "eval":
         return asyncio.run(_eval(args))
     if args.command == "overnight":
+        if args.detach:
+            return _detach_overnight(args, arguments)
         return _overnight(args)
     if args.command == "smoke":
         return asyncio.run(_smoke(args))

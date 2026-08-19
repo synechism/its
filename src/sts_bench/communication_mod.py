@@ -22,6 +22,15 @@ _CARD_MODIFICATION_FLAGS = {
     "is_block_modified",
     "is_magic_number_modified",
 }
+_GONE_MONSTER_TRANSIENT_FIELDS = {
+    "block",
+    "intent",
+    "last_move_id",
+    "move_adjusted_damage",
+    "move_base_damage",
+    "move_hits",
+    "move_id",
+}
 
 
 class CommunicationError(RuntimeError):
@@ -68,11 +77,43 @@ def _stable_non_actionable_cards(value: Any) -> Any:
     return value
 
 
+def _canonical_screen(screen: dict[str, Any]) -> dict[str, Any]:
+    """Remove known presentation-only event flavor while retaining actionable text."""
+    result = _stable_non_actionable_cards(screen)
+    options = result.get("options") or []
+    sole_action = (
+        str(options[0].get("label", options[0].get("text", ""))).strip("[]").lower()
+        if len(options) == 1
+        else None
+    )
+    library_epilogue = result.get("event_id") == "The Library" and sole_action == "leave"
+    heart_statistics = result.get("event_id") == "Spire Heart" and sole_action == "sleep"
+    if library_epilogue or heart_statistics:
+        result.pop("body_text", None)
+    return result
+
+
 def _canonical_monster(monster: dict[str, Any]) -> dict[str, Any]:
     """Remove post-death animation residue from an already-gone monster."""
     result = dict(_scrub(monster))
     if result.get("is_gone", False) and not result.get("half_dead", False):
         result["powers"] = []
+        for field in _GONE_MONSTER_TRANSIENT_FIELDS:
+            result.pop(field, None)
+    return result
+
+
+def canonical_replay_state(payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply current semantic normalization to a canonical state from any protocol version."""
+    result = copy.deepcopy(payload)
+    combat = (result.get("visible") or {}).get("combat") or {}
+    if "monsters" in combat:
+        combat["monsters"] = [
+            _canonical_monster(monster) for monster in combat.get("monsters") or []
+        ]
+    visible = result.get("visible") or {}
+    if "screen" in visible:
+        visible["screen"] = _canonical_screen(visible.get("screen") or {})
     return result
 
 
@@ -287,7 +328,7 @@ def _visible_state(
         "potions": _scrub(game.get("potions") or []),
         "deck": _unordered_cards(game.get("deck") or []),
         "map": _map_state(game.get("map") or []),
-        "screen": _stable_non_actionable_cards(game.get("screen_state") or {}),
+        "screen": _canonical_screen(game.get("screen_state") or {}),
     }
     if deck_override is not None:
         visible["deck"] = copy.deepcopy(deck_override)
@@ -298,9 +339,7 @@ def _visible_state(
         combat_copy["draw_pile"] = _unordered_cards(combat.get("draw_pile") or [])
         combat_copy["discard_pile"] = _unordered_cards(combat.get("discard_pile") or [])
         combat_copy["exhaust_pile"] = _unordered_cards(combat.get("exhaust_pile") or [])
-        combat_copy["limbo"] = [
-            _canonical_card(card) for card in combat.get("limbo") or []
-        ]
+        combat_copy["limbo"] = [_canonical_card(card) for card in combat.get("limbo") or []]
         combat_copy["monsters"] = [
             _canonical_monster(monster) for monster in combat.get("monsters") or []
         ]

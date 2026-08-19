@@ -6,7 +6,7 @@ from typing import Any
 
 from sts_bench.models import GameState, LegalAction
 
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.1"
 SYSTEM_PROMPT = """You are playing a seeded run of the real Slay the Spire 1 game.
 The state contains the information available to a human player and an authoritative legal-action
 list. You may reason before acting, but your FINAL non-empty line must be exactly:

@@ -27,8 +27,8 @@ engine-maintenance transition is possible, the controller applies it without cal
 charging its decision/token budget: `WAIT` advances animations and resolves the game's transient
 `DEBUG` monster-intent frame and master-deck mutations from rewards, shops, events, and card grids;
 an observer-assisted `KEY CONFIRM` dismisses first-run tutorials through their native **Got It**
-button, and
-`KEY CANCEL` closes a Settings overlay opened by loss of window focus. Each remains fully recorded
+button, and `KEY CANCEL` closes a Settings overlay opened by loss of window focus. Each remains
+fully recorded
 in the trajectory with `automatic=true` so replay sees the exact same command sequence.
 
 ## Reproducibility identity
@@ -62,6 +62,12 @@ Per-attempt controller and game logs, retry history, current seed, and finalized
 written atomically to the status tree. Model credentials remain in the controller environment;
 explicit secret command arguments are redacted from durable status.
 
+The `overnight --detach` mode re-executes the same parsed command in a new process session and
+writes its PID, redacted command, log path, and status path under the run directory. This keeps the
+supervisor alive when the invoking terminal or desktop client closes. It does not daemonize the
+controller or game independently: the detached supervisor remains their owner and tears down their
+process groups together.
+
 ## Visible replay and video
 
 Replay reissues the recorded engine-command sequence against a newly seeded real game and verifies
@@ -70,6 +76,10 @@ callbacks never enter the normalized game state or action loop. The generated SR
 the wall-clock start of each verified action. Pillow renders transparent caption cards, and FFmpeg
 composites those cards over the system capture after the authoritative replay has finished. The raw
 capture and SRT remain available independently of the presentation render.
+
+Presentation speed is applied only during the final FFmpeg render. The real-game replay, hash
+verification, raw capture, and action timestamps are produced at normal execution speed; caption
+durations and video timestamps are scaled together afterward.
 
 ## Hidden information
 
@@ -87,12 +97,18 @@ live card's rules text and current numeric fields. It reads those fields from th
 card object so manifests identify the exact observation build. The controller retains live numeric
 values for actionable hand cards; cards in the deck and non-actionable piles/screens use their
 stable base values because `AbstractCard` leaves transient render calculations cached after a card
-moves between zones. Powers are retained for every live or half-dead monster, but discarded once
-the engine marks a monster `is_gone`; their later animation-driven cleanup has no gameplay effect
-and otherwise creates a sampling race. It also translates the benchmark's
-maintenance-only `KEY CONFIRM` command into the tutorial's native completed-click state because
-Communication Mod's keyboard injection cannot close that overlay. It owns no content table and
-performs no transition or reward logic.
+moves between zones. Powers and move/intent fields are retained for every live or half-dead
+monster, but discarded once the engine marks a monster `is_gone`; their later animation-driven
+cleanup has no gameplay effect and otherwise creates a sampling race. Legacy trajectories are
+replayed through the same semantic normalizer so old hashes remain verifiable without treating
+dead-monster render residue as game state. The same rule removes only The Library's randomized
+post-choice book-summary flavor after its sole remaining action is already `Leave`; initial event
+text, option text, rewards, and every other event field remain hashed. It also omits the personal
+and Steam-global lifetime damage counters from the victorious Heart epilogue once `Sleep` is the
+only action. Those counters are profile/network statistics, not seeded-run state. The observer also
+translates the benchmark's maintenance-only `KEY CONFIRM` command into the tutorial's native
+completed-click state because Communication Mod's keyboard injection cannot close that overlay. It
+owns no content table and performs no transition or reward logic.
 
 Tutorial flags, content unlocks, and boss-seen flags are mutable Steam-profile state, not seed
 state. The observer disables all first-time tutorials, fully unlocks content, and marks the nine

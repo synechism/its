@@ -7,10 +7,23 @@ from pathlib import Path
 
 from sts_bench.overnight import (
     OvernightConfig,
+    _controller_exit_error,
+    _failure_kind,
     completed_runs,
     expected_model_identity,
     run_overnight,
 )
+
+
+def test_controller_transport_timeout_has_actionable_retry_diagnostic(tmp_path: Path) -> None:
+    log = tmp_path / "controller.log"
+    log.write_text("Traceback\nTimeoutError: timed out\n", encoding="utf-8")
+
+    error = _controller_exit_error(1, log)
+
+    assert "transport timed out" in str(error)
+    assert str(log) in str(error)
+    assert _failure_kind(error) == "transport_timeout"
 
 
 def _write_run(

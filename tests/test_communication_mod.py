@@ -3,6 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 
 from sts_bench.communication_mod import (
+    canonical_replay_state,
     enumerate_legal_actions,
     normalize_state,
     observer_version,
@@ -192,7 +193,7 @@ def test_hash_keeps_live_values_for_actionable_hand_cards(combat_envelope: dict)
     assert first.stable_hash() != second.stable_hash()
 
 
-def test_hash_ignores_power_cleanup_on_gone_monsters(combat_envelope: dict) -> None:
+def test_hash_ignores_animation_cleanup_on_gone_monsters(combat_envelope: dict) -> None:
     baseline = deepcopy(combat_envelope)
     monster = baseline["game_state"]["combat_state"]["monsters"][1]
     monster.update(
@@ -201,10 +202,16 @@ def test_hash_ignores_power_cleanup_on_gone_monsters(combat_envelope: dict) -> N
             "is_gone": True,
             "half_dead": False,
             "powers": [{"id": "Vulnerable", "name": "Vulnerable", "amount": 1}],
+            "intent": "ATTACK",
+            "move_adjusted_damage": 15,
+            "move_base_damage": 14,
+            "move_hits": 1,
         }
     )
     cleaned = deepcopy(baseline)
-    cleaned["game_state"]["combat_state"]["monsters"][1]["powers"] = []
+    cleaned_monster = cleaned["game_state"]["combat_state"]["monsters"][1]
+    cleaned_monster["powers"] = []
+    cleaned_monster["move_adjusted_damage"] = 14
 
     first = normalize_state(
         baseline,
@@ -221,6 +228,8 @@ def test_hash_ignores_power_cleanup_on_gone_monsters(combat_envelope: dict) -> N
 
     assert first.stable_hash() == second.stable_hash()
     assert first.visible["combat"]["monsters"][1]["powers"] == []
+    assert "move_adjusted_damage" not in first.visible["combat"]["monsters"][1]
+    assert "intent" not in first.visible["combat"]["monsters"][1]
 
 
 def test_hash_keeps_powers_on_half_dead_monsters(combat_envelope: dict) -> None:
@@ -245,6 +254,46 @@ def test_hash_keeps_powers_on_half_dead_monsters(combat_envelope: dict) -> None:
     assert state.visible["combat"]["monsters"][1]["powers"] == [
         {"amount": 1, "id": "Regrow", "name": "Regrow"}
     ]
+
+
+def test_library_epilogue_flavor_is_ignored_but_initial_event_text_is_hashed() -> None:
+    state = {
+        "visible": {
+            "screen": {
+                "event_id": "The Library",
+                "body_text": "random book summary one",
+                "options": [{"label": "Leave", "text": "[Leave]"}],
+            }
+        }
+    }
+    other = deepcopy(state)
+    other["visible"]["screen"]["body_text"] = "random book summary two"
+
+    assert canonical_replay_state(state) == canonical_replay_state(other)
+
+    state["visible"]["screen"]["options"] = [{"label": "Read", "text": "[Read]"}]
+    other["visible"]["screen"]["options"] = [{"label": "Read", "text": "[Read]"}]
+    assert canonical_replay_state(state) != canonical_replay_state(other)
+
+
+def test_heart_global_statistics_are_ignored_only_on_terminal_sleep_screen() -> None:
+    state = {
+        "visible": {
+            "screen": {
+                "event_id": "Spire Heart",
+                "body_text": "Your total is 3,312 and the global total is 14,636,643,707.",
+                "options": [{"label": "Sleep", "text": "[Sleep]"}],
+            }
+        }
+    }
+    other = deepcopy(state)
+    other["visible"]["screen"]["body_text"] = "Both counters changed."
+
+    assert canonical_replay_state(state) == canonical_replay_state(other)
+
+    state["visible"]["screen"]["options"] = [{"label": "Attack", "text": "[Attack]"}]
+    other["visible"]["screen"]["options"] = [{"label": "Attack", "text": "[Attack]"}]
+    assert canonical_replay_state(state) != canonical_replay_state(other)
 
 
 def test_terminal_outcome_is_normalized(victory_envelope: dict) -> None:

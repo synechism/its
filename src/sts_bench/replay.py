@@ -13,6 +13,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+from sts_bench.communication_mod import canonical_replay_state
 from sts_bench.game import LiveGame
 from sts_bench.models import GameState
 
@@ -22,6 +23,7 @@ class ReplayResult:
     valid: bool
     decisions_verified: int
     message: str
+    normalized_comparisons: int = 0
 
 
 def _first_difference(expected: object, actual: object, path: str = "state") -> str | None:
@@ -44,9 +46,7 @@ def _first_difference(expected: object, actual: object, path: str = "state") -> 
             return f"{path}: expected {len(expected)} items, got {len(actual_list)}"
         pairs = zip(expected, actual_list, strict=True)
         for index, (expected_item, actual_item) in enumerate(pairs):
-            difference = _first_difference(
-                expected_item, actual_item, f"{path}[{index}]"
-            )
+            difference = _first_difference(expected_item, actual_item, f"{path}[{index}]")
             if difference:
                 return difference
         return None
@@ -64,10 +64,25 @@ def _divergence_message(
     actual_hash = state.stable_hash()
     detail = None
     if expected_state is not None:
-        actual_state = json.loads(json.dumps(state.canonical_dict()))
-        detail = _first_difference(expected_state, actual_state)
+        actual_state = canonical_replay_state(json.loads(json.dumps(state.canonical_dict())))
+        detail = _first_difference(canonical_replay_state(expected_state), actual_state)
     suffix = f"; {detail}" if detail else ""
     return f"{prefix}: expected {expected_hash}, got {actual_hash}{suffix}"
+
+
+def _matches_recorded_state(
+    state: GameState,
+    expected_hash: str,
+    expected_state: dict | None,
+) -> tuple[bool, bool]:
+    """Return (matches, needed legacy normalization)."""
+    if state.stable_hash() == expected_hash:
+        return True, False
+    if expected_state is None:
+        return False, False
+    actual_state = canonical_replay_state(json.loads(json.dumps(state.canonical_dict())))
+    expected = canonical_replay_state(expected_state)
+    return _first_difference(expected, actual_state) is None, True
 
 
 def load_trajectory(run_dir: Path) -> tuple[dict, list[dict]]:
@@ -91,11 +106,13 @@ def replay_live(
     on_step: ReplayStep | None = None,
 ) -> ReplayResult:
     manifest, rows = load_trajectory(run_dir)
+    normalized_comparisons = 0
     state = game.reset(
         str(manifest["seed"]), str(manifest["character"]), int(manifest["ascension"])
     )
     for index, row in enumerate(rows):
-        if state.stable_hash() != row["state_hash"]:
+        matches, normalized = _matches_recorded_state(state, row["state_hash"], row.get("state"))
+        if not matches:
             return ReplayResult(
                 False,
                 index,
@@ -105,7 +122,9 @@ def replay_live(
                     state,
                     row.get("state"),
                 ),
+                normalized_comparisons,
             )
+        normalized_comparisons += int(normalized)
         command = str(row["engine_command"])
         matches = [action for action in state.legal_actions if action.command == command]
         if len(matches) != 1:
@@ -115,8 +134,11 @@ def replay_live(
         if step_delay:
             time.sleep(step_delay)
         state = game.step(matches[0], count_decision=not bool(row.get("automatic", False)))
-        if state.stable_hash() != row["resulting_state_hash"]:
-            expected_state = rows[index + 1].get("state") if index + 1 < len(rows) else None
+        expected_state = rows[index + 1].get("state") if index + 1 < len(rows) else None
+        matches, normalized = _matches_recorded_state(
+            state, row["resulting_state_hash"], expected_state
+        )
+        if not matches:
             return ReplayResult(
                 False,
                 index + 1,
@@ -126,8 +148,18 @@ def replay_live(
                     state,
                     expected_state,
                 ),
+                normalized_comparisons,
             )
-    return ReplayResult(True, len(rows), "trajectory reproduced exactly in the real game")
+        normalized_comparisons += int(normalized)
+    if normalized_comparisons:
+        message = (
+            "trajectory reproduced semantically in the real game; "
+            f"{normalized_comparisons} legacy comparisons differed only in ignored "
+            "presentation-only residue"
+        )
+    else:
+        message = "trajectory reproduced exactly in the real game"
+    return ReplayResult(True, len(rows), message, normalized_comparisons)
 
 
 def verify_determinism(game: LiveGame, run_dir: Path) -> ReplayResult:
@@ -168,12 +200,12 @@ class ExternalRecorder:
         self.output = output
         self.process: subprocess.Popen[bytes] | None = None
         self._log = None
+        self.log_path = output.with_suffix(output.suffix + ".recorder.log")
         self.started_at: float | None = None
 
     def __enter__(self) -> ExternalRecorder:
         self.output.parent.mkdir(parents=True, exist_ok=True)
-        log_path = self.output.with_suffix(self.output.suffix + ".recorder.log")
-        self._log = log_path.open("wb")
+        self._log = self.log_path.open("wb")
         try:
             self.process = subprocess.Popen(
                 self.command,
@@ -192,8 +224,17 @@ class ExternalRecorder:
                 self.process.stdin.close()
             self._log.close()
             self._log = None
-            raise RuntimeError(f"recorder exited early; see {log_path}")
+            raise RuntimeError(f"recorder exited early; see {self.log_path}")
         return self
+
+    def ensure_running(self) -> None:
+        if self.process is None:
+            raise RuntimeError("recorder has not started")
+        return_code = self.process.poll()
+        if return_code is not None:
+            raise RuntimeError(
+                f"recorder exited during replay with status {return_code}; see {self.log_path}"
+            )
 
     def __exit__(self, *_: object) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -271,9 +312,7 @@ class ReplayTimeline:
 def _parse_srt_time(value: str) -> float:
     hours, minutes, remainder = value.split(":")
     seconds, milliseconds = remainder.split(",")
-    return (
-        int(hours) * 3_600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1_000
-    )
+    return int(hours) * 3_600 + int(minutes) * 60 + int(seconds) + int(milliseconds) / 1_000
 
 
 def _read_srt(path: Path) -> list[tuple[float, float, str]]:
@@ -283,9 +322,7 @@ def _read_srt(path: Path) -> list[tuple[float, float, str]]:
         if len(lines) < 3 or " --> " not in lines[1]:
             continue
         started, ended = lines[1].split(" --> ", 1)
-        events.append(
-            (_parse_srt_time(started), _parse_srt_time(ended), "\n".join(lines[2:]))
-        )
+        events.append((_parse_srt_time(started), _parse_srt_time(ended), "\n".join(lines[2:])))
     return events
 
 
@@ -315,7 +352,10 @@ def _render_caption(path: Path, caption: str) -> None:
     image.save(path)
 
 
-def _overlay_concat(subtitles: Path, directory: Path) -> Path:
+def _overlay_concat(subtitles: Path, directory: Path, *, speed: float = 1.0) -> Path:
+    if speed <= 0:
+        raise ValueError("video speed must be positive")
+    directory.mkdir(parents=True, exist_ok=True)
     events = _read_srt(subtitles)
     if not events:
         raise ValueError("action overlay timeline is empty")
@@ -323,11 +363,11 @@ def _overlay_concat(subtitles: Path, directory: Path) -> Path:
     Image.new("RGBA", (1_500, 210), (0, 0, 0, 0)).save(blank)
     frames: list[tuple[Path, float]] = []
     if events[0][0] > 0:
-        frames.append((blank, events[0][0]))
+        frames.append((blank, events[0][0] / speed))
     for index, (started, ended, caption) in enumerate(events):
         frame = directory / f"caption-{index:04d}.png"
         _render_caption(frame, caption)
-        frames.append((frame, max(0.05, ended - started)))
+        frames.append((frame, max(0.01, (ended - started) / speed)))
     concat = directory / "overlay.ffconcat"
     lines = ["ffconcat version 1.0"]
     for frame, duration in frames:
@@ -337,16 +377,25 @@ def _overlay_concat(subtitles: Path, directory: Path) -> Path:
     return concat
 
 
-def burn_action_overlay(raw_video: Path, subtitles: Path, output: Path) -> None:
+def burn_action_overlay(
+    raw_video: Path,
+    subtitles: Path,
+    output: Path,
+    *,
+    speed: float = 1.0,
+) -> None:
     """Burn a Pillow-rendered action timeline with FFmpeg's standard overlay filter."""
+    if speed <= 0:
+        raise ValueError("video speed must be positive")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="sts-bench-overlay-") as temporary:
-        concat = _overlay_concat(subtitles, Path(temporary))
+        concat = _overlay_concat(subtitles, Path(temporary), speed=speed)
         encoder = (
             ["-c:v", "h264_videotoolbox", "-b:v", "10M"]
             if sys.platform == "darwin"
             else ["-c:v", "libx264", "-preset", "fast", "-crf", "20"]
         )
+        speed_filter = ",setpts=PTS-STARTPTS" if speed == 1 else f",setpts=(PTS-STARTPTS)/{speed:g}"
         command = [
             "ffmpeg",
             "-y",
@@ -360,21 +409,19 @@ def burn_action_overlay(raw_video: Path, subtitles: Path, output: Path) -> None:
             str(concat),
             "-filter_complex",
             (
-                "[0:v]fps=30,scale=w='min(1920,iw)':h=-2,"
-                "tpad=stop_mode=clone:stop_duration=3[base];"
+                "[0:v]scale=w='min(1920,iw)':h=-2,"
+                f"tpad=stop_mode=clone:stop_duration=3{speed_filter},fps=30[base];"
                 "[1:v]format=rgba[caption];"
                 "[base][caption]overlay=x=32:y=H-h-120:"
                 "eof_action=pass:repeatlast=0:format=auto[video]"
             ),
             "-map",
             "[video]",
-            "-map",
-            "0:a?",
+            *(["-map", "0:a?"] if speed == 1 else []),
             *encoder,
             "-pix_fmt",
             "yuv420p",
-            "-c:a",
-            "copy",
+            *(["-c:a", "copy"] if speed == 1 else []),
             "-movflags",
             "+faststart",
             str(output),
