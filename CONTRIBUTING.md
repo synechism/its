@@ -15,8 +15,10 @@ uv run pytest
 uv build
 ```
 
-CI covers every supported Python minor version from 3.11 through 3.14. Live tests are excluded
-unless explicitly selected because they require a user-owned game installation.
+CI covers the core package on every supported Python minor version from 3.11 through 3.14 and the
+optional `verifiers` training adapter wherever its upstream dependency imports (currently
+3.11–3.13). Live tests are excluded unless explicitly selected because they require a user-owned
+game installation.
 
 For local game work, run the read-only preflight first:
 

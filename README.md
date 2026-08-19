@@ -198,11 +198,13 @@ uv run sts-bench verify-determinism /path/to/run --launch-game
 
 ## RL environment
 
-Install the optional training adapter with `uv sync --extra training`. The `verifiers.v1`
-environment in `sts_bench.environment` exposes sparse victory reward plus floor, boss, and legality
-metrics while leasing authoritative game workers from a local pool. Evaluation and video need one
-visible worker; large-scale RL requires a pool of licensed installations or a separately validated
-fast simulator. The actual game remains the gold-standard evaluator.
+Install the optional training adapter on Python 3.11–3.13 with `uv sync --extra training`.
+`verifiers` 0.1.x does not yet import on Python 3.14; the benchmark, evaluator, and artifact tools
+do. The `verifiers.v1` environment in `sts_bench.environment` exposes sparse victory reward plus
+floor, boss, and legality metrics while leasing authoritative game workers from a local pool.
+Evaluation and video need one visible worker; large-scale RL requires a pool of licensed
+installations or a separately validated fast simulator. The actual game remains the gold-standard
+evaluator.
 
 See [`docs/architecture.md`](docs/architecture.md) for the trust boundary, hidden-information
 policy, replay contract, process supervision, and training topology. See [`LEGAL.md`](LEGAL.md) for
